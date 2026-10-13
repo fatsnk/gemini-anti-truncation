@@ -2,6 +2,14 @@
 
 中文 | [English](CHANGELOG.md)
 
+## 未发布 — Gemini 4 Argon
+
+2026-10-14 的 `main` 源码更新，尚无新版本标签或 Release ZIP；现有 `sillytavern-v0.3.1` 包不含以下改动。请按[源码升级说明](docs/GEMINI4.md#升级方式)更新。
+
+- 适配 `gemini-4-argon` 的正常、非流式抗截断、原生流式抗截断与酒馆 Vertex 插件。使用思考等级，过滤官方列出的不支持参数，预填充转 USER 开关覆盖 Argon。
+- 保留原生工具调用 ID 与思考签名；数字思考预算、显式缓存和需要 continuation-token 长解码的输出额度在推理前报错，不自动追加付费请求。
+- 191 项本地测试和三次真实网关短请求通过，流式正文分 7 批到达。Express 仅做模拟验证，具体边界见[验收说明](docs/VALIDATION.md)。
+
 ## SillyTavern 集成 0.3.1
 
 独立网关保持 0.7.0。标签 `sillytavern-v0.3.1`。

@@ -84,7 +84,7 @@
                 <p class="hint">独立网关共用一套凭据。修正凭据后保存并应用，即可重新判断；模型列表不会触发推理探测。</p>
                 <label class="field">图片输入（实验）<select id="image-input" aria-describedby="image-input-help"><option value="off">关闭</option><option value="current-turn">当前轮转图</option><option value="all">全部会话转图</option></select></label><p id="image-input-help" class="hint">与 Unicode 互斥。文字转图片（无损 WebP）会增加用量，图片会触发抗截断缓冲回退。超限或不支持的字符会报错。</p>
                 <label class="toggle-row"><span>Unicode 输入转码（所有模型）<small>独立于抗截断，仅编码最新真实用户楼层的匹配文本。客户端须传递楼层原文；默认关闭，可能增加 token 用量。</small></span><input id="unicode-input" type="checkbox"></label>
-                <label class="toggle-row"><span>Gemini 3.7 / 3.8 Flash 预填充转为 USER<small>将末尾纯文本 assistant 消息改为 user，保留原文；工具和思考历史保持原样。转换不保证模型会接着预填充续写。</small></span><input id="prefill-to-user" type="checkbox" checked></label>
+                <label class="toggle-row"><span>Gemini 3.7 / 3.8 Flash、4 Argon 预填充转为 USER<small>将末尾纯文本 assistant 消息改为 user，保留原文；工具和思考历史保持原样。转换不保证模型会接着预填充续写。</small></span><input id="prefill-to-user" type="checkbox" checked></label>
                 <label class="toggle-row"><span>提示词提交失败后重试一次<small>匹配下方列出的上游错误（默认 “The prompt could not be submitted”）。仅在输出开始前重试，使用相同模型与档位。</small></span><input id="prompt-retry-enabled" type="checkbox" aria-describedby="retry-text-help retry-text-error"></label>
                 <div class="field retry-text-field"><label for="prompt-retry-text">重试时插入的 USER 文本</label><textarea id="prompt-retry-text" rows="8" spellcheck="false" aria-describedby="retry-text-help retry-text-count retry-text-error" placeholder="填写你准备的文本，建议约 7000 tokens。不会自动补齐、重复或截断。"></textarea>
                   <p id="retry-text-help" class="hint">先填写文本才能启用。文本插入在开头的 system / developer 消息之后、其余对话之前。仅重试时发送，会增加输入用量和等待时间；不会写入日志。</p>

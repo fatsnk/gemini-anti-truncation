@@ -1,5 +1,6 @@
 import { responseJsonSchema, vertexJsonSchema } from "./vertex-schema.mjs";
 import { isObject } from "./wire.mjs";
+import { isGemini4Argon, gemini4ToolMetadata } from "./gemini4.mjs";
 // OpenAI-compatible requests translated to Vertex's native generateContent format,
 // with the checks that decide whether a request translates without loss.
 
@@ -122,7 +123,7 @@ function contentParts(content) {
   return parts;
 }
 
-function functionResponsePart(message, callNames) {
+function functionResponsePart(message, callNames, model) {
   const name = callNames.get(message.tool_call_id) || message.name || "tool";
   let response;
   try {
@@ -131,10 +132,10 @@ function functionResponsePart(message, callNames) {
   } catch {
     response = { result: typeof message.content === "string" ? message.content : "" };
   }
-  return { functionResponse: { name, response } };
+  return { functionResponse: { name, response, ...(isGemini4Argon(model) ? { id: gemini4ToolMetadata(message.tool_call_id).id } : {}) } };
 }
 
-function assistantParts(message) {
+function assistantParts(message, model) {
   const parts = contentParts(message.content);
   for (const call of Array.isArray(message.tool_calls) ? message.tool_calls : []) {
     let args;
@@ -145,6 +146,11 @@ function assistantParts(message) {
       throw Object.assign(new Error("invalid_tool_history"), { status: 400, code: "invalid_tool_history" });
     }
     const part = { functionCall: { name: call.function?.name || "tool", args } };
+    if (isGemini4Argon(model)) {
+      const metadata = gemini4ToolMetadata(call.id);
+      part.functionCall.id = metadata.id;
+      if (metadata.signature) part.thoughtSignature = metadata.signature;
+    }
     if (typeof call.id === "string" && call.id.startsWith(SIGNATURE_ID_PREFIX)) {
       part.thoughtSignature = call.id.slice(SIGNATURE_ID_PREFIX.length);
     }
@@ -186,9 +192,9 @@ function buildNativeBody(payload) {
     const role = message.role === "assistant" ? "model" : "user";
     const parts =
       message.role === "assistant"
-        ? assistantParts(message)
+        ? assistantParts(message, payload.model)
         : message.role === "tool"
-          ? [functionResponsePart(message, callNames)]
+          ? [functionResponsePart(message, callNames, payload.model)]
           : contentParts(message.content);
     if (parts.length === 0) continue;
     const previous = contents.at(-1);

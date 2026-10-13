@@ -7,6 +7,7 @@ import { completionStream } from "./completion-stream.mjs";
 import { documentedUnsupported } from "./unsupported-params.mjs";
 import { protocolError, sseData, transformSse } from "./wire.mjs";
 import { bypassReason, BODY_LIMIT } from "../integrations/sillytavern/shared.js";
+import { isGemini4Argon, gemini4ThinkingLevel, validateGemini4Output } from "./gemini4.mjs";
 
 export const requestError = code => Object.assign(new Error(code), { status: 400, code });
 
@@ -57,13 +58,16 @@ export function prepareSillyTavernRequest(request, adapters) {
   }
   if (body.stop != null && (!Array.isArray(body.stop) || body.stop.some(value => typeof value !== "string"))) throw requestError("invalid_stop");
   if (body.stop?.length) config.stopSequences = [...body.stop];
-  if (/^gemini-(2\.5|3[.\d]*)-(flash|pro)/.test(body.model)) {
+  if (isGemini4Argon(body.model)) {
+    config.thinkingConfig = { thinkingLevel: gemini4ThinkingLevel(body.reasoning_effort) ?? "MEDIUM", includeThoughts: Boolean(body.include_reasoning) };
+  } else if (/^gemini-(2\.5|3[.\d]*)-(flash|pro)/.test(body.model)) {
     const budget = adapters.calculateGoogleBudgetTokens(body.max_tokens, String(body.reasoning_effort), body.model);
     config.thinkingConfig = { includeThoughts: Boolean(body.include_reasoning) && budget !== 0 };
     if (Number.isInteger(budget)) config.thinkingConfig.thinkingBudget = budget;
     else if (typeof budget === "string" && budget) config.thinkingConfig.thinkingLevel = budget;
   }
   const upstreamStream = mode === "streaming" && body.stream === true && !(body.vertex_image_input && body.vertex_image_input !== "off");
+  validateGemini4Output(body, body.model, upstreamStream);
   if (upstreamStream) native.toolConfig.functionCallingConfig.streamFunctionCallArguments = true;
   return { body: native, toolName: prepared.toolName, model: body.model, stream: body.stream === true, upstreamStream, mode, continuation };
 }

@@ -2,6 +2,14 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
+## Unreleased — Gemini 4 Argon
+
+Available from `main` (2026-10-14). No new version tag or Release ZIP; the existing `sillytavern-v0.3.1` package does not include these changes. Use the [source update instructions](docs/GEMINI4.en.md#updating).
+
+- Adapt `gemini-4-argon` across normal, buffered and native-streaming profiles, and the SillyTavern Vertex plugin. Use thinking levels instead of numeric budgets, filter documented unsupported parameters and extend the optional text-prefill conversion.
+- Preserve native function-call IDs together with thought signatures. Reject explicit caching, numeric thinking budgets and limits requiring unimplemented continuation-token long decode before inference.
+- 191 local tests and three bounded live gateway requests passed; native streaming delivered seven content-bearing reads. Express is covered by mocks. See [validation](docs/VALIDATION.en.md) for exact boundaries.
+
 ## SillyTavern integration 0.3.1
 
 The standalone gateway stays at 0.7.0. Tag `sillytavern-v0.3.1`.

@@ -31,6 +31,17 @@ const events = text => text.split("\n").filter(line => line.startsWith("data:") 
 const contents = text => events(text).flatMap(event => event.candidates ?? []).flatMap(candidate => candidate.content?.parts ?? [])
   .filter(part => !part.thought).map(part => part.text ?? "").join("");
 
+test("SillyTavern Gemini 4 uses thinking levels without relying on older Tavern model recognition", () => {
+  for (const [effort, level] of [["min", "LOW"], ["low", "LOW"], ["medium", "MEDIUM"], ["high", "HIGH"], ["max", "HIGH"], [undefined, "MEDIUM"]]) {
+    const prepared = prepareSillyTavernRequest(request({ model: "gemini-4-argon", reasoning_effort: effort, top_k: 40, presence_penalty: 1 }),
+      { ...adapters, calculateGoogleBudgetTokens() { throw new Error("old model detector must not run"); } });
+    assert.deepEqual(prepared.body.generationConfig.thinkingConfig, { thinkingLevel: level, includeThoughts: true });
+    assert.equal(prepared.body.generationConfig.maxOutputTokens, 128);
+    for (const key of ["temperature", "topP", "topK", "presencePenalty"]) assert.equal(prepared.body.generationConfig[key], undefined);
+  }
+  assert.throws(() => prepareSillyTavernRequest(request({ model: "gemini-4-argon", max_tokens: 65537 }), adapters), { code: "gemini4_long_decode_required" });
+});
+
 test("SillyTavern intercept is scoped, preserves CSRF/cancellation, and never retries failures", async () => {
   const calls = [];
   const original = async (...args) => { calls.push(args); return new Response("failure", { status: 429 }); };

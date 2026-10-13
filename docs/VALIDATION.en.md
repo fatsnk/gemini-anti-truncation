@@ -4,6 +4,16 @@
 
 Local fixtures, live standalone requests and historical router checks cover different parts of the system.
 
+## Gemini 4 Argon (2026-10-14, main source update)
+
+Verification passed 191 local tests. After the documentation update, the pre-commit check passed for 98 release files. New coverage includes thinking-level mapping, explicit config precedence, rejection before inference for numeric budgets/caches/long-decode limits, prefills, native function-call ID/signature round trips, and an Express/OAuth × transport × JSON/SSE mock matrix. The SillyTavern package was generated without installing it into the existing Tavern.
+
+The user authorized at most eight upstream calls, each capped at 512 output tokens, using fixed short prompts and stopping on the first error. All eight passed with HTTP 200 and stop, without retries, on the existing service account, global, Standard. Three exercised this gateway: normal and buffered requests returned OK; the native tool stream restored 454 characters over seven content-bearing reads, with first content at 1.97 s and a 566 ms content span. These are single short samples, not performance or long-context quality benchmarks.
+
+Five calls exercised the parent router through its existing smoke script against a temporary instance of the same source with retries disabled and a shared hard call limit. Its native tool stream delivered seven content-bearing reads over 739 ms and passed restoration audit checks. The daily Docker router was separately rebuilt and checked for health, ownership, loopback binding, controller readiness and the three new model IDs.
+
+Live Express entitlement, Argon Priority/Flex, installed Tavern browser behavior, and long-form quality remain unverified. Continuation-token long decode is not implemented. Delivery is a `main` source update; the existing `sillytavern-v0.3.1` Release ZIP predates it. See the [setup and update guide](GEMINI4.en.md).
+
 ## Standalone package
 
 ### SillyTavern integration 0.3.1: Continue support, streaming fix and one-step installer (2026-10-09)

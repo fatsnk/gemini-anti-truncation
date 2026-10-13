@@ -12,6 +12,7 @@ import { translateNativeCompletion, wrapNativeStream } from "./vertex-protocol.m
 import { modelProfiles } from "./model-profiles.mjs";
 import { completionStream, aliasStream } from "./completion-stream.mjs";
 import { convertGeminiPrefill, fetchWithGeminiRecovery, compatibilityLogFields } from "./gemini-compat.mjs";
+import { prepareGemini4Request, validateGemini4Output } from "./gemini4.mjs";
 import { documentedUnsupported, dropParams } from "./unsupported-params.mjs";
 import { googleErrorDetail, trafficType, upstreamErrorLogFields } from "./wire.mjs";
 import { waitWithSignal } from "./abort.mjs";
@@ -177,6 +178,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       route = models.find(model => model.id === payload.model);
       if (!route) throw new Problem(400, "unsupported_model");
       if (route.enabled === false) throw new Problem(503, "model_disabled");
+      payload = prepareGemini4Request(payload, route.upstreamModel);
       try {
         const prepared = prepareUnicodeInput(payload, config.unicodeInput === true, config.bodyLimitBytes);
         payload = prepared.payload; unicode = prepared.metadata;
@@ -214,6 +216,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       const transport = prepareAntiTruncation(payload, route.mode !== "normal" && config.antiTruncation !== false, route.mode === "streaming");
       const buffered = route.mode === "buffered" && Boolean(transport.toolName);
       const upstreamStream = stream && !buffered;
+      validateGemini4Output(payload, route.upstreamModel, upstreamStream);
       if (buffered) transport.reason = "tool-transport-buffered";
       const native = transport.nativeStreaming || config.nativeOnly;
       if (config.nativeOnly && !supportsNativeRequest(payload)) throw new Problem(400, "unsupported_native_fields");
@@ -231,7 +234,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
         return body;
       };
       // Preserve local field/schema rejection before authentication.
-      const upstreamPayload = { ...transport.payload, stream: upstreamStream };
+      const upstreamPayload = { ...transport.payload, model: route.upstreamModel, stream: upstreamStream };
       const firstBody = requestBody(upstreamPayload);
       // A failed token exchange (or its timeout, or an unusable service account) is a local
       // credential problem; cancellation still reports 499/504 below.

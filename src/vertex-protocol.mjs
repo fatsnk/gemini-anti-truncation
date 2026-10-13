@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { SIGNATURE_ID_PREFIX, mapFinishReason, translateUsage } from "./vertex-native.mjs";
 import { isObject, protocolError, sseData, transformSse } from "./wire.mjs";
+import { isGemini4Argon, encodeGemini4ToolId } from "./gemini4.mjs";
 // Native replies for requests without the synthetic transport: complete replies,
 // and streams whose function calls arrive whole.
 
-function candidateMessage(candidate) {
+function candidateMessage(candidate, model) {
   const message = { role: "assistant", content: "" };
   for (const part of candidate.content?.parts ?? []) {
     if (part.text && part.thought) message.reasoning_content = (message.reasoning_content || "") + part.text;
@@ -14,7 +15,7 @@ function candidateMessage(candidate) {
       // FunctionCall.args is optional: a call to a parameterless function may omit it.
       const args = fc.args ?? {};
       if (fc.partialArgs || typeof fc.name !== "string" || !isObject(args)) throw protocolError("invalid_native_tool");
-      (message.tool_calls ??= []).push({ id: part.thoughtSignature ? SIGNATURE_ID_PREFIX + part.thoughtSignature : "call_" + randomUUID(),
+      (message.tool_calls ??= []).push({ id: isGemini4Argon(model) && fc.id ? encodeGemini4ToolId(part) : part.thoughtSignature ? SIGNATURE_ID_PREFIX + part.thoughtSignature : "call_" + randomUUID(),
         type: "function", function: { name: fc.name, arguments: JSON.stringify(args) } });
     }
   }
@@ -30,7 +31,7 @@ export function translateNativeCompletion(native, model) {
   if (!Array.isArray(candidates) || !candidates.length) throw protocolError("invalid_native_completion");
   return { id: "chatcmpl-" + randomUUID(), object: "chat.completion", created: Math.floor(Date.now() / 1000), model,
     choices: candidates.map((c, i) => {
-      const message = candidateMessage(c);
+      const message = candidateMessage(c, model);
       if (!c.finishReason) throw protocolError("incomplete_native_completion");
       return { index: c.index ?? i, message, finish_reason: mapFinishReason(c.finishReason, Boolean(message.tool_calls)), native_finish_reason: promptBlockReason || c.finishReason };
     }), usage: translateUsage(native.usageMetadata) };
@@ -54,7 +55,7 @@ export function wrapNativeStream(response, model, onUsage = () => {}, includeUsa
       const index = candidate.index ?? 0;
       const state = states.get(index) || { done: false, tools: 0 };
       if (state.done) throw protocolError("native_data_after_finish");
-      const message = candidateMessage(candidate);
+      const message = candidateMessage(candidate, model);
       const delta = { ...message };
       if (message.tool_calls) delta.tool_calls = message.tool_calls.map(call => ({ ...call, index: state.tools++ }));
       const reason = candidate.finishReason ? mapFinishReason(candidate.finishReason, state.tools > 0) : null;

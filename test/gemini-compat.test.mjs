@@ -15,6 +15,38 @@ const context = "Private custom retry context.\n".repeat(1000);
 const credentials = { ...DEFAULT_SETTINGS, authMode: "access-token", projectId: "example-project",
   gatewayKey: "synthetic-roleplay-local-key", accessToken: "synthetic-roleplay-oauth", apiKey: "synthetic-roleplay-express" };
 const profile = { id: "roleplay", upstreamModel: "google/gemini-3.8-flash", mode: "normal" };
+test("Gemini 4 routes normalize thinking and parameters across auth, transport and response modes", async t => {
+  for (const authMode of ["access-token", "express"]) for (const mode of ["normal", "buffered", "streaming"]) for (const stream of [false, true]) {
+    const f = await fixture(t, undefined, { authMode, models: [{ ...profile, upstreamModel: "google/gemini-4-argon", mode }] });
+    const response = await f.post({ ...payload(), stream, max_tokens: 512, reasoning_effort: "low", n: 1, presence_penalty: 0.2 });
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /Fixture answer/);
+    assert.equal(f.calls.length, 1);
+    const call = f.calls[0];
+    if (call.url.endsWith("/chat/completions")) {
+      assert.equal(call.body.model, "google/gemini-4-argon");
+      assert.deepEqual(call.body.extra_body.google.thinking_config, { thinking_level: "LOW" });
+      for (const key of ["reasoning_effort", "n", "temperature", "presence_penalty"]) assert.equal(call.body[key], undefined);
+    } else {
+      assert.match(call.url, /\/gemini-4-argon:/);
+      assert.deepEqual(call.body.generationConfig.thinkingConfig, { thinkingLevel: "LOW" });
+      for (const key of ["candidateCount", "temperature", "presencePenalty"]) assert.equal(call.body.generationConfig[key], undefined);
+    }
+    assert.equal(response.headers.get("x-gemini-prefill-converted"), "true");
+    if (authMode === "express") assert.equal(call.headers["x-goog-api-key"], credentials.apiKey);
+  }
+});
+
+test("Gemini 4 invalid budgets, caches and buffered long output fail before any submission", async t => {
+  const f = await fixture(t, undefined, { models: [{ ...profile, upstreamModel: "google/gemini-4-argon", mode: "buffered" }] });
+  for (const patch of [{ extra_body: { google: { thinking_config: { thinking_budget: 100 } } } },
+    { extra_body: { google: { cached_content: "fixture" } } }, { max_tokens: 32769, stream: true }]) {
+    const response = await f.post({ ...payload(), ...patch });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error.code, /gemini4/);
+  }
+  assert.equal(f.calls.length, 0);
+});
 const payload = () => ({ model: profile.id, messages: [{ role: "system", content: "System rules" },
   { role: "developer", content: "Developer rules" }, { role: "user", content: "Start" },
   { role: "assistant", content: "Earlier answer" }, { role: "user", content: "Continue" },
@@ -59,9 +91,9 @@ async function fixture(t, respond = call => success(call), settings = {}) {
   };
 }
 
-test("prefill conversion preserves history and only converts plain-text trailing 3.7/3.8 Flash assistant messages", () => {
+test("prefill conversion preserves history and only converts supported plain-text trailing assistant messages", () => {
   const original = payload(), copy = structuredClone(original);
-  for (const model of ["gemini-3.7-flash", "google/gemini-3.8-flash", "google/gemini-3.8-flash-preview", "google/gemini-3.8-flash@001"]) {
+  for (const model of ["gemini-3.7-flash", "google/gemini-3.8-flash", "google/gemini-3.8-flash-preview", "google/gemini-3.8-flash@001", "google/gemini-4-argon"]) {
     const result = convertGeminiPrefill(original, model, true);
     assert.equal(result.converted, true);
     assert.deepEqual(result.payload.messages.at(-1), { ...original.messages.at(-1), role: "user" });
