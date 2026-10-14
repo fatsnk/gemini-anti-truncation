@@ -1,10 +1,22 @@
 import { prepareUnicodeInput } from "../../src/unicode-input.mjs";
 export const PLUGIN_ID = "vertex-anti-truncation";
 export const PLUGIN_VERSION = "0.4.0";
+// The oldest server plugin that understands every request this extension may
+// send (Continue arrived in 0.3.1). SillyTavern updates a Git-installed server
+// plugin on start but not the extension, so a newer server is common.
+export const MIN_SERVER_VERSION = "0.3.1";
 export const MODES = ["off", "buffered", "streaming"];
 export const GENERATE_PATH = "/api/backends/chat-completions/generate";
 export const PLUGIN_PATH = `/api/plugins/${PLUGIN_ID}`;
 export const BODY_LIMIT = 8 * 1024 * 1024;
+
+export function compareVersions(a, b) {
+  const left = a.split(".").map(Number), right = b.split(".").map(Number);
+  for (let index = 0; index < 3; index++) {
+    if ((left[index] || 0) !== (right[index] || 0)) return (left[index] || 0) - (right[index] || 0);
+  }
+  return 0;
+}
 
 export function latestUserFloor(chat) {
   if (!Array.isArray(chat)) return "";

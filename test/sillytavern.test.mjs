@@ -4,7 +4,7 @@ import http from "node:http";
 import { once } from "node:events";
 import { prepareSillyTavernRequest, restoreSillyTavernResponse } from "../src/sillytavern.mjs";
 import { createGenerateHandler, connectionForRequest } from "../integrations/sillytavern/server.mjs";
-import { createFetchInterceptor, bypassReason, BODY_LIMIT, GENERATE_PATH, PLUGIN_PATH } from "../integrations/sillytavern/shared.js";
+import { createFetchInterceptor, bypassReason, compareVersions, BODY_LIMIT, GENERATE_PATH, MIN_SERVER_VERSION, PLUGIN_PATH, PLUGIN_VERSION } from "../integrations/sillytavern/shared.js";
 import { sseData } from "../src/wire.mjs";
 import { CONTINUATION_INSTRUCTION } from "../src/anti-truncation.mjs";
 
@@ -641,4 +641,11 @@ test("Continue delivers only the upstream suffix in one request across stream, b
   assert.equal(failed.status, 429);
   assert.equal((await failed.json()).error.code, "vertex_upstream_http_error");
   assert.equal(sent.length, count + 1);
+});
+
+test("the extension accepts any server plugin from the compatibility floor up, newer ones included", () => {
+  assert.ok(compareVersions(MIN_SERVER_VERSION, PLUGIN_VERSION) <= 0);
+  for (const [a, b, sign] of [["0.4.0", "0.3.1", 1], ["0.3.10", "0.3.9", 1], ["0.3.1", "0.3.1", 0], ["0.3.0", "0.3.1", -1], ["1.0", "0.9.9", 1], ["0.4", "0.4.0", 0]]) {
+    assert.equal(Math.sign(compareVersions(a, b)), sign, `${a} vs ${b}`);
+  }
 });

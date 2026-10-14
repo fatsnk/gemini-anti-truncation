@@ -2,6 +2,14 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
+## Unreleased — update experience
+
+Available from `main` (2026-10-14); the version stays 0.4.0.
+
+- The extension no longer requires the server plugin to report exactly its own version, only 0.3.1 or later. SillyTavern auto-updates a Git-installed server plugin on every start but never the extension, so after each release those users used to hit a version mismatch that blocked Continue and image input.
+- The panel now tells a missing server plugin from an outdated one and gives the update steps for each install method; when the versions differ but are compatible, a manual check suggests updating the older half.
+- The Tavern guide's update section now explains, per install method, how to update and what Tavern updates on its own.
+
 ## SillyTavern integration 0.4.0
 
 The standalone gateway stays at 0.7.0. Tag `sillytavern-v0.4.0`. Both halves now read 0.4.0; when upgrading from 0.3.x, update both together, since the panel reports a version mismatch while only one half is updated.

@@ -4,6 +4,12 @@
 
 Local fixtures, live standalone requests and historical router checks cover different parts of the system.
 
+## Update experience (2026-10-14, main source update)
+
+From the SillyTavern 1.19.0 source: `enableServerPluginsAutoUpdate` (on by default) runs `git pull` on Git-installed server plugins at every start; third-party UI extensions update automatically only when their manifest sets `auto_update` and Tavern's own version changed. This extension does not set it, so it is only updated by hand.
+
+`npm run verify` passed the check of 101 release files and 203 tests, including a new unit test of the version rule. The real extension entry ran in the Claude desktop app's built-in Chromium browser against a simulated status endpoint: with no server plugin it asked for an install and blocked Continue; 0.3.0 was reported as too old with the update steps for both install methods, and Continue was blocked; 0.3.1, 0.4.0 and 0.5.0 all let Continue through, and a manual check suggested updating the server, reported it ready, or suggested updating the extension respectively. Not observed in a real Tavern.
+
 ## TauriTavern (2026-10-14, released in SillyTavern integration 0.4.0)
 
 `npm run verify` passed the check of 101 release files and 202 tests. The 11 new tests in `test/tauritavern.test.mjs` use a simulated Tavern route and cover: the request staying on Tavern's own route with its headers and abort signal, native tool fields in Additional Parameters, merging existing JSON parameters and bypassing YAML ones, piece-by-piece restoration (the first piece arrives before the upstream ends), JSON and buffered-SSE delivery, native finish codes for length limits, five interrupted/malformed/upstream-error cases that neither report success nor echo provider error text, Tavern's own error text, cancellation without an error event, Continue, the Argon output limit before sending, and the absence of Node-only imports in everything the extension loads.

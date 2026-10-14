@@ -1,4 +1,4 @@
-import { PLUGIN_ID, PLUGIN_PATH, PLUGIN_VERSION, MODES, createFetchInterceptor, latestUserFloor } from "./shared.js";
+import { PLUGIN_ID, PLUGIN_PATH, PLUGIN_VERSION, MIN_SERVER_VERSION, MODES, compareVersions, createFetchInterceptor, latestUserFloor } from "./shared.js";
 
 // TauriTavern has no Node server to host the plugin, so the extension shapes the
 // request and restores the reply itself. Rendering text as images needs the server.
@@ -12,15 +12,15 @@ const reasons = { "existing-tools": "已有工具调用", "structured-output": "
   model: "此模型不适用", "too-large": "请求超过 8 MiB", "additional-parameters": "Vertex 附加参数不是 JSON 对象，无法合并" };
 const errors = { unicode_floor_required: "找不到真实用户楼层，已停止发送。请先输入消息，或关闭 Unicode 转码。",
   unicode_input_too_large: "转码后的请求超过大小限制，已停止发送。请缩短输入或关闭 Unicode 转码。",
-  plugin_not_ready: "服务端插件未就绪或版本不匹配，本次请求已停止发送。请同时更新前后端插件并重启酒馆。",
+  plugin_not_ready: "服务端插件未就绪或版本太旧，本次请求已停止发送。点“检查插件连接”查看原因和更新办法。",
   image_input_requires_supported_request: "图片输入不支持此请求，已停止发送，未改用明文。请去掉不支持的内容或换用支持的模型，或关闭图片输入。",
   image_input_unsupported_characters: "图片输入不支持 emoji、控制字符或字体缺字，已停止发送。请删除这些字符，或改用“图片·当前轮”/关闭图片输入。",
   image_input_too_large: "转成图片后超过大小或页数限制，已停止发送。请缩短对话，或改用“图片·当前轮”。",
   image_renderer_unavailable: "服务端图片渲染组件不可用。请在服务端插件目录运行 npm ci --ignore-scripts 后重启酒馆。",
   image_render_failed: "服务端图片渲染失败，已停止发送，未改用明文。",
   request_too_large: "请求超过 8 MiB，插件已拒绝发送。请减少附件或聊天历史。" };
-const backendWarning = "服务端插件未就绪或版本不匹配。安装配套服务端插件并重启酒馆，然后重新检查。";
-let status, select, backendReady;
+const updateServer = "用安装包装的，下载新版安装包再运行一次；用 Git 装的，在服务端插件目录运行 git pull --ff-only 和 npm ci --ignore-scripts。之后重启酒馆并重新检查。";
+let status, select, backendReady, backendWarning;
 function settings() {
   const store = SillyTavern.getContext().extensionSettings;
   store[PLUGIN_ID] ??= { mode: "off", unicodeInput: false };
@@ -53,16 +53,19 @@ function updateStatus(result) {
 
 async function checkBackend(silent = false) {
   if (!silent) showStatus("正在检查服务端插件…");
+  let version;
   try {
     const response = await fetch(`${PLUGIN_PATH}/status`, { headers: context.getRequestHeaders(), signal: AbortSignal.timeout(5000) });
     const data = response.ok ? await response.json() : null;
-    if (data?.id !== PLUGIN_ID || data?.version !== PLUGIN_VERSION) throw new Error();
-    backendReady = true;
-    showStatus(silent ? "" : "服务端插件已就绪。");
-  } catch {
-    backendReady = false;
-    showStatus();
-  }
+    if (data?.id === PLUGIN_ID && typeof data.version === "string") version = data.version;
+  } catch {}
+  backendReady = Boolean(version) && compareVersions(version, MIN_SERVER_VERSION) >= 0;
+  backendWarning = !version ? "找不到服务端插件。请安装配套服务端插件，确认 config.yaml 中 enableServerPlugins 为 true，重启酒馆后重新检查。"
+    : `服务端插件 ${version} 太旧，需要 ${MIN_SERVER_VERSION} 或更新。${updateServer}`;
+  const difference = backendReady ? compareVersions(version, PLUGIN_VERSION) : 0;
+  showStatus(silent || !backendReady ? "" : difference < 0 ? `服务端插件已就绪（${version}），可以使用；它比扩展 ${PLUGIN_VERSION} 旧，建议更新：${updateServer}`
+    : difference > 0 ? `服务端插件已就绪（${version}），可以使用；扩展 ${PLUGIN_VERSION} 比它旧，建议在扩展管理器里更新本扩展。`
+    : `服务端插件已就绪（${version}）。`);
   return backendReady;
 }
 
