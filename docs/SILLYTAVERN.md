@@ -8,6 +8,32 @@
 
 适配依据：SillyTavern 1.19.0 的 `vertexai_form`、`SillyTavern.getContext()`、Google 提示词转换和原生响应读取逻辑。其他版本需要重新检查这些接口。
 
+## 手机上怎么装
+
+先看手机上的酒馆是怎么运行的：
+
+| 手机上怎么用酒馆 | 装什么 | 在哪里操作 |
+| --- | --- | --- |
+| 在 Termux 里运行 SillyTavern，用手机浏览器打开 | 插件的两半：UI 扩展和服务端插件 | 全部在 Termux 里输入命令。“酒馆根目录”就是 Termux 里的 SillyTavern 文件夹，一般是 `~/SillyTavern` |
+| 用 TauriTavern 的 App | 只装 UI 扩展 | 在 App 里：**扩展程序 → 安装扩展**，填本仓库的 Git URL，分支留空。不需要 Termux，也不用输入命令 |
+| 手机浏览器连接电脑或服务器上的酒馆 | 装在运行酒馆的那台机器上 | 手机上不用装任何东西 |
+
+独立网关在手机上一般用不到。
+
+Termux 里的 SillyTavern：先在运行酒馆的那个窗口按 Ctrl+C 关闭酒馆，再逐行执行：
+
+```sh
+cd ~
+git clone --depth 1 https://github.com/ken050210/vertex-streaming-anti-truncation
+cd vertex-streaming-anti-truncation
+node scripts/package-sillytavern.mjs
+node dist/sillytavern/install.mjs ~/SillyTavern
+```
+
+酒馆不在 `~/SillyTavern` 时，把最后一行的路径换成实际位置。安装程序会先列出要做的事，按回车后开始。装完照常启动酒馆、刷新网页，在 **API 连接 → Google Vertex AI** 面板底部找“抗截断传输”，点“检查插件连接”。需要 Node.js 22.9 以上（`node -v` 查看，版本低时用 `pkg install nodejs` 装到最新版）。以后更新：进入 `~/vertex-streaming-anti-truncation`，运行 `git pull --ff-only`，再重复最后两行。
+
+验证状态：安装程序的自动测试在 Linux、macOS 和 Windows 上通过，但 Termux 上的安装和 TauriTavern 手机 App 里的安装都没有实测过。图片渲染组件提供 Android arm64 版本，装不上时只影响图片输入。
+
 ## 选哪种装法
 
 - **一键安装包**：一次装好两半，自带查重、配置备份和失败回滚。装进去的不是 Git 副本，不会随酒馆的插件自动更新或扩展管理器更新。

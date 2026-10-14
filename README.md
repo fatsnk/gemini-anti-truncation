@@ -14,6 +14,8 @@
 | 用 TauriTavern（TT 酒馆） | 抗截断插件的适配版：只装 UI 扩展 | [TauriTavern 说明](docs/SILLYTAVERN.md#tauritavern) |
 | 不用酒馆的 Vertex 连接，或给其他 OpenAI 兼容客户端用 | 独立网关 | 本页[启动](#启动) |
 
+在手机上使用时，先看[手机上怎么装](docs/SILLYTAVERN.md#手机上怎么装)：Termux 里的 SillyTavern 在 Termux 中用命令安装插件，TauriTavern App 只需在应用里安装扩展。
+
 **由 AI 助手代为安装时**：请助手先读 [给 AI 助手的安装指引](docs/AGENT-INSTALL.md)。里面有判断酒馆类型的方法、可以直接执行的命令、需要先问用户的事项和核对办法。“插件”指前两行，不是网关。可以把下面这段话直接发给助手：
 
 ```text

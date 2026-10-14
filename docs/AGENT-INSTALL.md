@@ -14,6 +14,8 @@ If you are an AI agent asked to install this plugin for a user, read this file f
 | 名叫 TauriTavern 的桌面或手机应用（程序名含 `TauriTavern`，应用标识 `com.tauritavern.client`）；数据目录里有 `default-user` 和 `_tauritavern`，没有 `server.js` | TauriTavern（TT 酒馆） | 只装 UI 扩展，见 [TauriTavern](#tauritavern) |
 | 用户不用酒馆的 Vertex 连接，或想给其他 OpenAI 兼容客户端用 | 独立网关 | 不属于“插件”，见 [README 的“启动”](../README.md#启动) |
 
+手机上：Termux 里运行的是 SillyTavern，按 SillyTavern 一节在 Termux 里操作，酒馆文件夹通常是 `~/SillyTavern`。TauriTavern 的手机 App 只能由用户在应用里“安装扩展”，你无法代装，把 Git URL 和步骤告诉用户即可。
+
 最可靠的办法是直接问用户用的是哪一个、装在哪个文件夹。用户也不清楚时可以帮着找：正在运行的进程里有没有 `node server.js` 或名字含 `TauriTavern` 的程序，桌面快捷方式指向哪里。两种都找到、都没找到，或者位置拿不准时，停下来问。不要猜，也不要先装网关。
 
 ## 动手前向用户确认

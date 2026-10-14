@@ -14,6 +14,8 @@ This repository can be used in three ways. Pick the one that matches your setup:
 | TauriTavern | The adaptation of that plugin: the UI extension only | [TauriTavern section (Chinese)](docs/SILLYTAVERN.md#tauritavern) |
 | No Tavern Vertex connection, or another OpenAI-compatible client | The standalone gateway | [Setup](#setup) on this page |
 
+On a phone, see [installing on a phone (Chinese)](docs/SILLYTAVERN.md#手机上怎么装): SillyTavern running in Termux gets the plugin through commands typed in Termux, while the TauriTavern app only needs the extension installed from inside the app.
+
 **If an AI agent installs it for you:** have the agent read the [install guide for AI agents (Chinese)](docs/AGENT-INSTALL.md) first. It explains how to tell the two Taverns apart and gives runnable commands, the questions to ask the user and the checks to run. "Plugin" means the first two rows, not the gateway. You can send the agent this prompt as it is:
 
 ```text
