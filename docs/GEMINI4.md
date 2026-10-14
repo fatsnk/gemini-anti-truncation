@@ -6,11 +6,11 @@
 
 ## 升级方式
 
-本次是 `main` 源码更新，尚无新的版本标签或 Release ZIP。现有 `sillytavern-v0.3.1` 安装包不含 Gemini 4 适配；仅查看插件的 0.3.1 版本号不能确认已更新。
+酒馆插件部分随 SillyTavern 集成 0.4.0（`sillytavern-v0.4.0`）发布，更早的安装包不含此适配。独立网关部分在 `main` 源码中，网关版本号仍为 0.7.0。
 
 - 独立网关：停止网关后，在本仓库执行 `git pull --ff-only`、`npm ci --ignore-scripts`，再启动。若本地有冲突，先处理自己的修改，不要覆盖配置；保存的模型、凭据、输出额度和超时不自动改变。
 - 酒馆 Git 安装：同步更新 UI 扩展和服务端插件至同一个 `main` 提交，服务端运行 `npm ci --ignore-scripts`，再重启酒馆、刷新页面。具体目录和迁移方式见[酒馆更新说明](SILLYTAVERN.md#更新与已有手动安装)。
-- 一键安装包用户：从更新后的源码运行 `npm run package:sillytavern`，使用新生成的 `dist/sillytavern` 安装包；旧 Release ZIP 不会因 `main` 更新而改变。不要把 Git 副本直接覆盖到安装包管理的目录上。
+- 一键安装包用户：下载 `sillytavern-v0.4.0` 的安装包再运行一次；或从更新后的源码运行 `npm run package:sillytavern`，使用新生成的 `dist/sillytavern` 安装包。不要把 Git 副本直接覆盖到安装包管理的目录上。
 
 本次开发验收只生成并检查了安装包，没有更新现有酒馆安装。
 

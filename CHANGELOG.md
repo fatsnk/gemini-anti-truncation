@@ -2,9 +2,17 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
-## Unreleased — TauriTavern adaptation
+## SillyTavern integration 0.4.0
 
-Available from `main` (2026-10-14). No new version tag; the plugin version stays 0.3.1. See the [TauriTavern section (Chinese)](docs/SILLYTAVERN.md#tauritavern).
+The standalone gateway stays at 0.7.0. Tag `sillytavern-v0.4.0`. Both halves now read 0.4.0; when upgrading from 0.3.x, update both together, since the panel reports a version mismatch while only one half is updated.
+
+- Releases the two sections below: the TauriTavern adaptation and the Tavern plugin part of the Gemini 4 Argon adaptation.
+- The one-step package matches the release commit on `main`. It also works for SillyTavern in Termux; TauriTavern does not use the package.
+- See [validation](docs/VALIDATION.en.md).
+
+## TauriTavern adaptation
+
+Released in SillyTavern integration 0.4.0. See the [TauriTavern section (Chinese)](docs/SILLYTAVERN.md#tauritavern).
 
 - The UI extension now works on its own in [TauriTavern](https://github.com/Darkatse/TauriTavern), which cannot run the server plugin. There the extension shapes the request and restores the reply itself: the transport instruction is appended to Tavern's own Vertex request and the native `tools`/`toolConfig` travel in its Additional Parameters. TauriTavern keeps the credentials, prompt conversion, sampling and thinking settings.
 - Both transport modes read Google's raw streaming events as TauriTavern forwards them, so native finish codes are kept; buffered mode does not stream arguments and delivers one checked, complete reply. Unicode input and the Continue adaptation work; image input does not. YAML Additional Parameters for Vertex cannot be merged, so that request uses plain Vertex and the panel says why.
@@ -12,9 +20,9 @@ Available from `main` (2026-10-14). No new version tag; the plugin version stays
 - Add an [install guide for AI agents (Chinese)](docs/AGENT-INSTALL.md) and a "Which one to install" section at the top of both READMEs: how to tell SillyTavern from TauriTavern, a command-line-only install, what to ask the user and how to check the result. The Tavern guide gains command-line equivalents for its UI steps and notes that the Release ZIP predates `main` and that the packaged UI folder cannot be used in TauriTavern. A new section covers phones: SillyTavern in Termux and the TauriTavern app.
 - 202 local tests passed. The extension completed six requests against a simulated Tavern route in a Chromium engine and loaded in a local TauriTavern 2.1.1 and 2.3.0. Six live Vertex requests (Gemini 3.7 Flash) covered streaming, buffered, Continue and output-limit cases; their bodies were built by a script following TauriTavern's source, so a request sent by its own backend remains unverified. See [validation](docs/VALIDATION.en.md).
 
-## Unreleased — Gemini 4 Argon
+## Gemini 4 Argon
 
-Available from `main` (2026-10-14). No new version tag or Release ZIP; the existing `sillytavern-v0.3.1` package does not include these changes. Use the [source update instructions](docs/GEMINI4.en.md#updating).
+The Tavern plugin part is released in SillyTavern integration 0.4.0; the gateway part is a `main` source update from 2026-10-14 and the gateway version stays 0.7.0. Use the [source update instructions](docs/GEMINI4.en.md#updating).
 
 - Adapt `gemini-4-argon` across normal, buffered and native-streaming profiles, and the SillyTavern Vertex plugin. Use thinking levels instead of numeric budgets, filter documented unsupported parameters and extend the optional text-prefill conversion.
 - Preserve native function-call IDs together with thought signatures. Reject explicit caching, numeric thinking budgets and limits requiring unimplemented continuation-token long decode before inference.

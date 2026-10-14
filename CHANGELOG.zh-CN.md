@@ -2,9 +2,17 @@
 
 中文 | [English](CHANGELOG.md)
 
-## 未发布 — TauriTavern（TT 酒馆）适配版
+## SillyTavern 集成 0.4.0
 
-2026-10-14 的 `main` 源码更新，尚无新版本标签；插件版本号仍为 0.3.1。说明见 [TauriTavern](docs/SILLYTAVERN.md#tauritavern)。
+独立网关保持 0.7.0。标签 `sillytavern-v0.4.0`。前后端版本号一起改为 0.4.0，从 0.3.x 升级时请同时更新两半，只更新一半时面板会提示版本不匹配。
+
+- 发布下面两节的改动：TauriTavern（TT 酒馆）适配版，以及 Gemini 4 Argon 适配中属于酒馆插件的部分。
+- 一键安装包内容与 `main` 上的发版提交相同；Termux 里的 SillyTavern 也可使用，TauriTavern 不使用安装包。
+- 验证见[验收说明](docs/VALIDATION.md)。
+
+## TauriTavern（TT 酒馆）适配版
+
+随 SillyTavern 集成 0.4.0 发布。说明见 [TauriTavern](docs/SILLYTAVERN.md#tauritavern)。
 
 - UI 扩展可单独在 [TauriTavern](https://github.com/Darkatse/TauriTavern) 中使用。TauriTavern 不能运行服务端插件，扩展检测到它后自己改写请求并还原回复：传输指令追加到酒馆自己的 Vertex 请求，原生 `tools`／`toolConfig` 通过“附加参数”写入，凭据、提示词转换、采样与思考参数仍由 TauriTavern 处理。
 - 两种抗截断模式都读取 TauriTavern 转发的 Google 原始流式事件，保留原始结束原因；非流式抗截断不开启参数流，完整并通过检查后一次交付。Unicode 转码与“继续”适配可用；图片输入不可用。Vertex“附加参数”写成 YAML 时本次走普通 Vertex 并显示原因。
@@ -12,9 +20,9 @@
 - 新增[给 AI 助手的安装指引](docs/AGENT-INSTALL.md)，README 开头增加“安装哪一种”分流：如何判断 SillyTavern 与 TauriTavern、全程命令行的安装步骤、要先问用户的事项和核对方法。酒馆说明补上界面操作的命令行等价做法，并注明 Release 压缩包不含 `main` 上的改动、打包出的前端目录不能用于 TauriTavern。另增“手机上怎么装”：Termux 里的 SillyTavern 与 TauriTavern App 各自的装法。
 - 202 项本地测试通过。扩展在 Chromium 内核中用模拟酒馆通道完成 6 次请求，并在本机 TauriTavern 2.1.1 与 2.3.0 中完成加载；另有 6 次真实 Vertex 请求（Gemini 3.7 Flash）验证了流式、非流式、“继续”和输出上限截断；请求体由脚本按 TauriTavern 源码规则拼出，其自身后台发出的请求尚未验证，见[验收说明](docs/VALIDATION.md)。
 
-## 未发布 — Gemini 4 Argon
+## Gemini 4 Argon
 
-2026-10-14 的 `main` 源码更新，尚无新版本标签或 Release ZIP；现有 `sillytavern-v0.3.1` 包不含以下改动。请按[源码升级说明](docs/GEMINI4.md#升级方式)更新。
+酒馆插件部分随 SillyTavern 集成 0.4.0 发布；独立网关部分为 2026-10-14 的 `main` 源码更新，网关版本号仍为 0.7.0。请按[源码升级说明](docs/GEMINI4.md#升级方式)更新。
 
 - 适配 `gemini-4-argon` 的正常、非流式抗截断、原生流式抗截断与酒馆 Vertex 插件。使用思考等级，过滤官方列出的不支持参数，预填充转 USER 开关覆盖 Argon。
 - 保留原生工具调用 ID 与思考签名；数字思考预算、显式缓存和需要 continuation-token 长解码的输出额度在推理前报错，不自动追加付费请求。

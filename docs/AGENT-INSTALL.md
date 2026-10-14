@@ -55,7 +55,7 @@ node dist/sillytavern/install.mjs "<ST>"
 - 克隆到酒馆目录以外的临时位置，装完可以删掉。
 - 直接调用 `install.mjs`。不要运行 `install-windows.cmd`，它结尾会等待按键。
 - 没有终端输入时安装程序不会停下来等确认，所以运行前先确认酒馆已关闭。
-- 不要改用 Release 页面的 `sillytavern-v0.3.1` 压缩包：它早于 `main` 上的 Gemini 4 适配，而两者的版本号都是 0.3.1，事后无法凭版本号分辨。
+- 也可以用 Release 页面最新的一键安装包代替前三条命令（解压后同样运行 `node install.mjs "<ST>"`），但它只在发版时更新；四条命令装的是 `main` 的最新代码。不要用标签早于 `sillytavern-v0.4.0` 的压缩包，它们没有 Gemini 4 与 TauriTavern 适配。
 - 离线或装不上依赖时加 `--skip-deps`。只影响图片输入，联网后重跑一次即可补上。克隆或下载失败时把原因告诉用户（通常需要代理），不要换来源。
 
 安装程序做的事：服务端插件放到 `plugins/vertex-anti-truncation`，UI 扩展放到 `public/scripts/extensions/third-party/vertex-anti-truncation`，安装图片渲染依赖，`enableServerPlugins` 不是 `true` 时先把 `config.yaml` 备份为 `config.yaml.backup-时间` 再改。成功时退出码为 0 并打印“安装完成”；失败时退出码非 0 并打印“安装未完成：原因”，原有文件保持不变。它只接受 SillyTavern 文件夹，对其他目录会直接拒绝。
@@ -92,7 +92,7 @@ cd "<ST>/plugins/vertex-streaming-anti-truncation" && npm ci --ignore-scripts
 curl http://127.0.0.1:8000/api/plugins/vertex-anti-truncation/status
 ```
 
-返回 `{"id":"vertex-anti-truncation","version":"0.3.1","ready":true}` 即服务端插件已加载。端口以 `config.yaml` 的 `port` 为准；开启了账号或基础认证的酒馆不能这样检查。界面上的等价检查是 **API 连接 → Google Vertex AI → 抗截断传输 → 检查插件连接**。只装了一半时这里会失败，不要在此之前报告安装成功。这个检查说明插件已加载，但版本号分不出装的是 `main` 还是旧压缩包。
+返回 `{"id":"vertex-anti-truncation","version":"<版本号>","ready":true}`，且版本号与仓库 `manifest.json` 里的 `version` 相同，即服务端插件已加载。端口以 `config.yaml` 的 `port` 为准；开启了账号或基础认证的酒馆不能这样检查。界面上的等价检查是 **API 连接 → Google Vertex AI → 抗截断传输 → 检查插件连接**。只装了一半时这里会失败，不要在此之前报告安装成功。版本号只在发版时更新，所以它分不出同一版本号下 `main` 上的后续改动。
 
 ## TauriTavern
 

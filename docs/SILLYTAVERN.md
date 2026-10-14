@@ -55,7 +55,7 @@ node dist/sillytavern/install.mjs ~/SillyTavern
 
 发现用 Git、扩展管理器或手动复制安装的副本（包括各用户自己的扩展目录）时，安装程序列出路径并停止，不覆盖也不删除，以免插件被加载两次。更新时下载新版安装包再运行一次；用安装包装的副本不是 Git 仓库，不会随酒馆的插件自动更新或扩展管理器更新。
 
-安装包在 [GitHub Release `sillytavern-v0.3.1`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.3.1) 下载 `vertex-anti-truncation-sillytavern-0.3.1.zip`，可用同页的 `SHA256.txt` 校验。该压缩包是 0.3.1 标签时的内容，不含之后 `main` 上的改动（如 Gemini 4 适配），而版本号同为 0.3.1。要装 `main`，在本仓库运行 `npm run package:sillytavern`，生成的 `dist/sillytavern` 就是安装包内容；打包不需要先安装依赖。
+安装包在 [GitHub Release `sillytavern-v0.4.0`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.4.0) 下载 `vertex-anti-truncation-sillytavern-0.4.0.zip`，可用同页的 `SHA256.txt` 校验。压缩包只在发版时更新，版本号也只在发版时改变；发版之后 `main` 上的新改动不会进入已发布的压缩包。要装 `main` 的最新代码，在本仓库运行 `npm run package:sillytavern`，生成的 `dist/sillytavern` 就是安装包内容；打包不需要先安装依赖。
 
 ## 从 GitHub 安装
 
@@ -100,7 +100,7 @@ npm ci --ignore-scripts
 
 ### 更新与已有手动安装
 
-Gemini 4 Argon 的适配位于 2026-10-14 的 `main` 源码，尚未包含在现有 `sillytavern-v0.3.1` Release ZIP 中。需要同步更新两端 Git 副本，或从新源码重新生成安装包；插件版本号仍为 0.3.1，不能仅凭版本号判断是否包含此适配。见 [Gemini 4 升级方式](GEMINI4.md#升级方式)。
+0.4.0 包含 Gemini 4 Argon 与 TauriTavern 适配。从 0.3.x 升级时前后端要一起更新到 0.4.0：只更新一半时，面板会提示服务端插件版本不匹配，“继续”和图片输入请求会停止发送。见 [Gemini 4 升级方式](GEMINI4.md#升级方式)。
 
 - 用一键安装包安装的，下载新版安装包再运行一次。
 - 用 Git 安装的，前端使用酒馆扩展管理器更新；服务端在其仓库目录依次运行 `git pull --ff-only` 和 `npm ci --ignore-scripts`，然后重启酒馆。两端应使用同一版本。
@@ -128,7 +128,7 @@ npm run package:sillytavern
 
 复制后在 `plugins/vertex-anti-truncation` 目录运行 `npm ci --ignore-scripts` 安装图片渲染依赖。服务端需启用 `enableServerPlugins: true`，然后重启酒馆、刷新网页。
 
-当前 Release 为 [`sillytavern-v0.3.1`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.3.1)，ZIP 内含安装程序和上表两个目录。旧版 [`sillytavern-v0.1.0`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.1.0) 的 ZIP 不含 Unicode 与图片输入。
+当前 Release 为 [`sillytavern-v0.4.0`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.4.0)，ZIP 内含安装程序和上表两个目录。旧版 [`sillytavern-v0.3.1`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.3.1) 不含 Gemini 4 与 TauriTavern 适配；[`sillytavern-v0.1.0`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.1.0) 的 ZIP 不含 Unicode 与图片输入。
 
 ## 使用
 
@@ -163,7 +163,7 @@ Express、Flex、Priority 需要将地区设为 `global`。完整服务账号的
 
 ## TauriTavern
 
-本节说明为 [TauriTavern](https://github.com/Darkatse/TauriTavern)（TT 酒馆）做的适配版。TauriTavern 把酒馆的 Node.js 后台换成了 Rust，不能运行服务端插件。在 TauriTavern 中只安装 UI 扩展：扩展检测到 TauriTavern 后，自己完成抗截断的请求改写和回复还原；凭据、提示词转换、采样与思考参数仍由 TauriTavern 处理。这是 `main` 源码更新，尚无新的版本标签。
+本节说明为 [TauriTavern](https://github.com/Darkatse/TauriTavern)（TT 酒馆）做的适配版。TauriTavern 把酒馆的 Node.js 后台换成了 Rust，不能运行服务端插件。在 TauriTavern 中只安装 UI 扩展：扩展检测到 TauriTavern 后，自己完成抗截断的请求改写和回复还原；凭据、提示词转换、采样与思考参数仍由 TauriTavern 处理。随 SillyTavern 集成 0.4.0 发布（标签 `sillytavern-v0.4.0`）。
 
 ### 安装
 
@@ -223,8 +223,8 @@ Unicode 转码在浏览器中、抗截断分流之前执行；普通／旁路请
 
 ### 版本与验收
 
-TauriTavern 适配是 2026-10-14 的 `main` 源码更新，不改变版本号，也不要求更新 SillyTavern 上已安装的服务端插件；在 SillyTavern 中扩展的行为不变。
+TauriTavern 适配和 Gemini 4 Argon 适配随 0.4.0 发布。在 SillyTavern 中扩展的行为不变，但版本号改为 0.4.0，前后端须一起更新。
 
-0.3.1 之后 `main` 上的 Gemini 4 与 TauriTavern 改动都没有更改版本号，面板的版本检查分不出新旧。要确认装到的代码是否含这些改动，看它是不是来自 `main` 的对应提交，不要只看版本号。
+版本号只在发版时更新。发版之后 `main` 上的改动在下一次发版前不改版本号，面板的版本检查分不出新旧；要确认装到的代码是否含某项改动，看它来自哪个提交。
 
-当前前端与服务端均为 0.3.1，对应标签／Release `sillytavern-v0.3.1`，包含“继续”适配、流式修复和一键安装包。请同时更新前后端，以免版本检查失败。0.3.0 对应标签 `sillytavern-v0.3.0`（与网关 `v0.7.0` 为同一提交）；0.2.0 未发布标签；上方 v0.1.0 标签／Release 不含 Unicode 与图片输入。Unicode 转码在 v0.2.0（当时为独立勾选框）时完成的短请求验收见[验收记录](UNICODE-INPUT-AUDIT.md)（英文）。0.3.1 的离线验证、6 次真实后端测试、流式修复验证和剩余验收范围见[验收说明](VALIDATION.md)。
+当前前端与服务端均为 0.4.0，对应标签／Release `sillytavern-v0.4.0`。0.3.1（标签 `sillytavern-v0.3.1`）包含“继续”适配、流式修复和一键安装包。请同时更新前后端，以免版本检查失败。0.3.0 对应标签 `sillytavern-v0.3.0`（与网关 `v0.7.0` 为同一提交）；0.2.0 未发布标签；上方 v0.1.0 标签／Release 不含 Unicode 与图片输入。Unicode 转码在 v0.2.0（当时为独立勾选框）时完成的短请求验收见[验收记录](UNICODE-INPUT-AUDIT.md)（英文）。0.4.0 与 0.3.1 的验证和剩余验收范围见[验收说明](VALIDATION.md)。

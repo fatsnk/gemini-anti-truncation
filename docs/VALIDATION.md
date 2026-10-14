@@ -4,7 +4,7 @@
 
 本页区分本地模拟测试、独立网关的真实上游测试，以及提取前的 router 验证。
 
-## TauriTavern（2026-10-14，main 源码更新）
+## TauriTavern（2026-10-14，随 SillyTavern 集成 0.4.0 发布）
 
 `npm run verify` 通过 101 个发布文件检查和 202 项测试，其中 `test/tauritavern.test.mjs` 新增 11 项，用模拟的酒馆通道覆盖：请求留在酒馆自己的路由并保留请求头与取消信号、原生工具字段写入附加参数、已有 JSON 附加参数合并与 YAML 旁路、参数流逐段还原（首段先于上游结束到达）、非流式与缓冲 SSE 两种交付形状、长度上限保留原始结束原因、五种中断／损坏／上游错误不报成功且不回显上游错误正文、酒馆自身错误文本原样送达、取消不产生错误事件、“继续”指令与状态、Argon 输出上限在发送前检查，以及扩展加载的全部模块不含 Node 专用导入。
 
@@ -35,7 +35,7 @@
 
 尚未覆盖：由 TauriTavern 自己的后台发出的真实请求（需要在其中保存 Vertex 凭据）及其页面上的逐段显示、Express／Flex／Priority、通过 TauriTavern 的扩展管理器安装和更新、Android／iOS／macOS 的 WebView、TauriTavern 中的 Gemini 4 Argon（核对时仅其 `dev` 分支收录该模型）。
 
-## Gemini 4 Argon（2026-10-14，main 源码更新）
+## Gemini 4 Argon（2026-10-14；酒馆插件部分随 0.4.0 发布）
 
 `npm run verify` 通过 191 项测试；提交前补齐文档后，`npm run check` 检查 98 个发布文件通过。新增覆盖思考等级、旧客户端等级别名、显式配置优先、数字预算与缓存的本地拒绝、每次上游输出上限、预填充开关、原生工具 ID/签名往返，以及 Express/OAuth × 三种传输 × 普通/SSE 的模拟请求矩阵。旧酒馆预算适配器不认识 Argon 时仍能生成 LOW/MEDIUM/HIGH。安装包生成完成，未安装进现有酒馆。
 
@@ -45,9 +45,17 @@
 
 母仓库的同源码临时实例完成另外 5 次，调用原有 `Invoke-RouterSmokeTest.ps1`：正常 JSON/SSE、抗截断 JSON、实验性抗截断 JSON/SSE。实验性流式 7 次正文读取、跨度 739 ms，日志还原状态检查通过。临时实例禁用重试并用统一硬限额保护测试；没有把测试写入日常服务的使用记录。日常 Docker 实例已重建，三个模型在实际 `/v1/models` 中可见，健康、所有权、回环绑定与控制台独立核实。
 
-尚未覆盖：真实 Express API key 的 Argon 权限、Priority/Flex 的 Argon 实测、已安装酒馆的浏览器交互、长上下文/长篇输出质量。没有实现超过单次上游上限的 continuation-token 长解码。本次交付为 `main` 源码更新，现有 `sillytavern-v0.3.1` Release ZIP 不含此适配。配置与升级说明见 [Gemini 4](GEMINI4.md)。
+尚未覆盖：真实 Express API key 的 Argon 权限、Priority/Flex 的 Argon 实测、已安装酒馆的浏览器交互、长上下文/长篇输出质量。没有实现超过单次上游上限的 continuation-token 长解码。酒馆插件部分随 `sillytavern-v0.4.0` 发布，独立网关部分为 `main` 源码更新。配置与升级说明见 [Gemini 4](GEMINI4.md)。
 
 ## 独立发布包
+
+### SillyTavern 集成 0.4.0：TauriTavern 与 Gemini 4 Argon 适配（2026-10-14）
+
+发布时 `npm run verify` 通过 101 个发布文件检查和 202 项测试；发版前最近一次提交在 GitHub Actions 的 Linux、macOS、Windows（Node.js 22.9、22、24）上通过。代码即上文“TauriTavern”和“Gemini 4 Argon”两节验证的内容，前后端版本号改为 0.4.0。
+
+安装包：ZIP 内 63 个条目，路径都用正斜杠；解压后与 `npm run package:sillytavern` 的输出逐文件一致，前后端均为 0.4.0。在模拟酒馆目录中运行 ZIP 里的安装程序（没有终端输入）：首次安装联网装好图片渲染组件，备份并开启 `enableServerPlugins`，退出码 0；再次运行按更新处理，不改 `config.yaml`，退出码 0。
+
+尚未验证：安装程序在真实 SillyTavern 和 Termux 上的运行，以及 0.4.0 前后端装入真实酒馆后的加载；其余未覆盖项见上文两节。
 
 ### SillyTavern 集成 0.3.1：“继续”适配、流式修复与一键安装包（2026-10-09）
 

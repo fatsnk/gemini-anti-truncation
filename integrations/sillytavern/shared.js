@@ -1,6 +1,6 @@
 import { prepareUnicodeInput } from "../../src/unicode-input.mjs";
 export const PLUGIN_ID = "vertex-anti-truncation";
-export const PLUGIN_VERSION = "0.3.1";
+export const PLUGIN_VERSION = "0.4.0";
 export const MODES = ["off", "buffered", "streaming"];
 export const GENERATE_PATH = "/api/backends/chat-completions/generate";
 export const PLUGIN_PATH = `/api/plugins/${PLUGIN_ID}`;

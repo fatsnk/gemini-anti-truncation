@@ -4,7 +4,7 @@
 
 Local fixtures, live standalone requests and historical router checks cover different parts of the system.
 
-## TauriTavern (2026-10-14, main source update)
+## TauriTavern (2026-10-14, released in SillyTavern integration 0.4.0)
 
 `npm run verify` passed the check of 101 release files and 202 tests. The 11 new tests in `test/tauritavern.test.mjs` use a simulated Tavern route and cover: the request staying on Tavern's own route with its headers and abort signal, native tool fields in Additional Parameters, merging existing JSON parameters and bypassing YAML ones, piece-by-piece restoration (the first piece arrives before the upstream ends), JSON and buffered-SSE delivery, native finish codes for length limits, five interrupted/malformed/upstream-error cases that neither report success nor echo provider error text, Tavern's own error text, cancellation without an error event, Continue, the Argon output limit before sending, and the absence of Node-only imports in everything the extension loads.
 
@@ -35,7 +35,7 @@ Install paths actually executed: from a fresh clone without `node_modules`, `nod
 
 Not covered: a live request sent by TauriTavern's own backend (needs Vertex credentials saved there) and its piece-by-piece display on the page, Express/Flex/Priority, installing and updating through TauriTavern's extension manager, Android/iOS/macOS WebViews, and Gemini 4 Argon in TauriTavern (only its `dev` branch listed the model when checked).
 
-## Gemini 4 Argon (2026-10-14, main source update)
+## Gemini 4 Argon (2026-10-14; Tavern plugin part released in 0.4.0)
 
 Verification passed 191 local tests. After the documentation update, the pre-commit check passed for 98 release files. New coverage includes thinking-level mapping, explicit config precedence, rejection before inference for numeric budgets/caches/long-decode limits, prefills, native function-call ID/signature round trips, and an Express/OAuth × transport × JSON/SSE mock matrix. The SillyTavern package was generated without installing it into the existing Tavern.
 
@@ -43,9 +43,17 @@ The user authorized at most eight upstream calls, each capped at 512 output toke
 
 Five calls exercised the parent router through its existing smoke script against a temporary instance of the same source with retries disabled and a shared hard call limit. Its native tool stream delivered seven content-bearing reads over 739 ms and passed restoration audit checks. The daily Docker router was separately rebuilt and checked for health, ownership, loopback binding, controller readiness and the three new model IDs.
 
-Live Express entitlement, Argon Priority/Flex, installed Tavern browser behavior, and long-form quality remain unverified. Continuation-token long decode is not implemented. Delivery is a `main` source update; the existing `sillytavern-v0.3.1` Release ZIP predates it. See the [setup and update guide](GEMINI4.en.md).
+Live Express entitlement, Argon Priority/Flex, installed Tavern browser behavior, and long-form quality remain unverified. Continuation-token long decode is not implemented. The Tavern plugin part ships in `sillytavern-v0.4.0`; the gateway part is a `main` source update. See the [setup and update guide](GEMINI4.en.md).
 
 ## Standalone package
+
+### SillyTavern integration 0.4.0: TauriTavern and Gemini 4 Argon adaptations (2026-10-14)
+
+At release `npm run verify` passed the check of 101 release files and 202 tests, and the last commit before the release passed GitHub Actions on Linux, macOS and Windows (Node.js 22.9, 22, 24). The code is what the "TauriTavern" and "Gemini 4 Argon" sections above validated; both halves now read 0.4.0.
+
+Package: the ZIP holds 63 entries, all with forward-slash paths; extracted, it matches the `npm run package:sillytavern` output file for file, with both halves at 0.4.0. Its installer ran against a simulated Tavern folder without terminal input: the first run installed the image renderer from the network, backed up `config.yaml` and enabled server plugins, exiting 0; a second run updated in place without touching `config.yaml`, exiting 0.
+
+Not verified: the installer on a real SillyTavern or in Termux, and 0.4.0 loading in a real Tavern; the sections above list the rest.
 
 ### SillyTavern integration 0.3.1: Continue support, streaming fix and one-step installer (2026-10-09)
 
