@@ -6,7 +6,7 @@
 
 ## TauriTavern（2026-10-14，main 源码更新）
 
-`npm run verify` 通过 100 个发布文件检查和 202 项测试，其中 `test/tauritavern.test.mjs` 新增 11 项，用模拟的酒馆通道覆盖：请求留在酒馆自己的路由并保留请求头与取消信号、原生工具字段写入附加参数、已有 JSON 附加参数合并与 YAML 旁路、参数流逐段还原（首段先于上游结束到达）、非流式与缓冲 SSE 两种交付形状、长度上限保留原始结束原因、五种中断／损坏／上游错误不报成功且不回显上游错误正文、酒馆自身错误文本原样送达、取消不产生错误事件、“继续”指令与状态、Argon 输出上限在发送前检查，以及扩展加载的全部模块不含 Node 专用导入。
+`npm run verify` 通过 101 个发布文件检查和 202 项测试，其中 `test/tauritavern.test.mjs` 新增 11 项，用模拟的酒馆通道覆盖：请求留在酒馆自己的路由并保留请求头与取消信号、原生工具字段写入附加参数、已有 JSON 附加参数合并与 YAML 旁路、参数流逐段还原（首段先于上游结束到达）、非流式与缓冲 SSE 两种交付形状、长度上限保留原始结束原因、五种中断／损坏／上游错误不报成功且不回显上游错误正文、酒馆自身错误文本原样送达、取消不产生错误事件、“继续”指令与状态、Argon 输出上限在发送前检查，以及扩展加载的全部模块不含 Node 专用导入。
 
 浏览器内核检查：在 Claude 桌面应用的内置浏览器（Chromium）中加载真实的扩展入口 `index.js`，宿主全局对象和酒馆通道为模拟。面板只显示关闭／Unicode 两项输入转码、没有“检查插件连接”按钮；6 次模拟请求覆盖流式逐段还原、非流式 JSON、缓冲 SSE、流式中断（错误事件）、非流式中断（HTTP 502 且面板显示代码）和酒馆错误文本。
 
@@ -29,7 +29,11 @@
 
 依据源码而未在运行中验证：TauriTavern v2.1.1、v2.3.0 与 `main`（2026-10-10）都在构建完上游请求体后应用附加参数，并把 Vertex 的流式事件原样转发。
 
-尚未覆盖：由 TauriTavern 自己的后台发出的真实请求（需要在其中保存 Vertex 凭据）及其页面上的逐段显示、Express／Flex／Priority、通过扩展管理器从 Git 安装、Android／iOS／macOS 的 WebView、TauriTavern 中的 Gemini 4 Argon（核对时仅其 `dev` 分支收录该模型）。
+安装文档与安装路径（同日）：请一个没有读过仓库的 AI 助手只读文档做纸面演练，场景是用户只说“帮我安装这个仓库里的抗截断插件”。第一次演练指出没有“装哪一种”的分流、唯一的安装命令属于网关、前端安装和核对只有界面操作、安装程序的命令行用法只写在代码注释里、打包出的前端目录在 TauriTavern 中无法加载、Release 压缩包与 `main` 版本号相同等问题，文档据此修改。修改后的第二次演练在读到第二个文件时即确定装法，三种情况（SillyTavern、TauriTavern、类型未知）给出的命令与[安装指引](AGENT-INSTALL.md)一致，没有阅读源码；它另外指出的版本要求写法不一、已装副本的处理、如何确认酒馆已关闭等缺口也已补上，补上之后没有再演练。
+
+实际执行过的安装路径：全新克隆（没有 `node_modules`）后运行 `node scripts/package-sillytavern.mjs` 和 `node dist/sillytavern/install.mjs <目录> --skip-deps`，在没有终端输入的情况下对模拟的酒馆目录完成安装，退出码 0，两半就位，`config.yaml` 先备份再开启服务端插件。在运行中的 SillyTavern 1.19.0（未开启账号）上，`/api/plugins/vertex-anti-truncation/status` 返回 0.3.1、ready。把仓库 `git clone --depth 1` 到 TauriTavern 2.3.0 的用户扩展目录后，扩展加载。未执行：对真实酒馆运行安装程序、Git 装法的三条命令、TauriTavern 界面里的“安装扩展”。
+
+尚未覆盖：由 TauriTavern 自己的后台发出的真实请求（需要在其中保存 Vertex 凭据）及其页面上的逐段显示、Express／Flex／Priority、通过 TauriTavern 的扩展管理器安装和更新、Android／iOS／macOS 的 WebView、TauriTavern 中的 Gemini 4 Argon（核对时仅其 `dev` 分支收录该模型）。
 
 ## Gemini 4 Argon（2026-10-14，main 源码更新）
 

@@ -4,15 +4,36 @@
 
 为 Vertex AI / Gemini 提供本地模型管理与工具调用抗截断传输。每个上游模型可保存正常、非流式抗截断和流式抗截断版本，可接入 SillyTavern 的自定义 OpenAI 连接。
 
-实验版，支持配置多个 Gemini 模型；默认保留 Gemini 3.7 Flash 的原有入口。模型与流式参数功能是否可用取决于上游。需要 Node.js 22.9+，图片输入使用 @napi-rs/canvas 与随附的 Noto CJK 字体。
+## 安装哪一种
+
+本仓库有三种用法，先按自己的情况选一种：
+
+| 你的情况 | 装什么 | 怎么装 |
+| --- | --- | --- |
+| 用 SillyTavern，想在 Google Vertex AI 连接面板里直接选抗截断 | 抗截断插件：UI 扩展和服务端插件两半 | [SillyTavern 说明](docs/SILLYTAVERN.md) |
+| 用 TauriTavern（TT 酒馆） | 抗截断插件的适配版：只装 UI 扩展 | [TauriTavern 说明](docs/SILLYTAVERN.md#tauritavern) |
+| 不用酒馆的 Vertex 连接，或给其他 OpenAI 兼容客户端用 | 独立网关 | 本页[启动](#启动) |
+
+**由 AI 助手代为安装时**：请助手先读 [给 AI 助手的安装指引](docs/AGENT-INSTALL.md)。里面有判断酒馆类型的方法、可以直接执行的命令、需要先问用户的事项和核对办法。“插件”指前两行，不是网关。可以把下面这段话直接发给助手：
+
+```text
+帮我安装 https://github.com/ken050210/vertex-streaming-anti-truncation 里的抗截断插件。
+动手前先完整阅读仓库的 docs/AGENT-INSTALL.md 并严格照做：
+https://raw.githubusercontent.com/ken050210/vertex-streaming-anti-truncation/main/docs/AGENT-INSTALL.md
+先判断我用的是 SillyTavern 还是 TauriTavern，找不到或拿不准就问我，不要猜，也不要装成独立网关。
+需要我关闭或重启酒馆时先告诉我；不要碰我的密钥、聊天和已有的插件文件。
+装完告诉我：你改了哪些文件、备份在哪里、怎么确认装好了、在哪里打开开关。
+```
+
+实验版，支持配置多个 Gemini 模型；默认保留 Gemini 3.7 Flash 的原有入口。模型与流式参数功能是否可用取决于上游。独立网关和 SillyTavern 服务端插件需要 Node.js 22.9+（TauriTavern 适配版不需要 Node.js），图片输入使用 @napi-rs/canvas 与随附的 Noto CJK 字体。
 
 已适配 **Gemini 4 Argon**（`gemini-4-argon`）：支持三种传输版本，处理思考等级、采样参数和预填充兼容；[添加方式、Express 快速 key、自定义上游的范围与长解码限制](docs/GEMINI4.md)。本次适配在 `main` 源码中，现有 `sillytavern-v0.3.1` Release ZIP 不含此改动。
 
 也提供 **SillyTavern 原生 Vertex 面板集成**：UI 扩展与服务端插件配套安装后，直接在 Google Vertex AI 连接面板选择关闭、非流式或流式抗截断，复用酒馆凭据，无需另开网关进程。默认关闭；[安装与验证说明](docs/SILLYTAVERN.md)。
 
-在酒馆“安装扩展”的 Git URL 输入框填入 `https://github.com/ken050210/vertex-streaming-anti-truncation`，分支留空。**首次还需在酒馆根目录执行** `node plugins.js install https://github.com/ken050210/vertex-streaming-anti-truncation` 安装配套服务端插件，再在 `plugins/vertex-streaming-anti-truncation` 目录运行 `npm ci --ignore-scripts` 安装图片输入所需的渲染依赖，启用 `enableServerPlugins` 并重启酒馆。仅安装前端无法完成抗截断传输；已有手动安装请先阅读[迁移说明](docs/SILLYTAVERN.md#更新与已有手动安装)，避免重复加载。也可以从 [Release `sillytavern-v0.3.1`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.3.1) 下载[一键安装包](docs/SILLYTAVERN.md#一键安装包)，解压后运行其中的安装程序，一次装好前后端并开启服务端插件，不需要 Git。
+SillyTavern 需要 1.19.x，有两种装法，只选一种：想在酒馆里跟随仓库更新，用 Git 装法；想一次装好两半，用一键安装包。Git 装法：在酒馆“安装扩展”的 Git URL 输入框填入 `https://github.com/ken050210/vertex-streaming-anti-truncation`，分支留空。**首次还需在酒馆根目录执行** `node plugins.js install https://github.com/ken050210/vertex-streaming-anti-truncation` 安装配套服务端插件，再在 `plugins/vertex-streaming-anti-truncation` 目录运行 `npm ci --ignore-scripts` 安装图片输入所需的渲染依赖，启用 `enableServerPlugins` 并重启酒馆。仅安装前端无法完成抗截断传输；已有手动安装请先阅读[迁移说明](docs/SILLYTAVERN.md#更新与已有手动安装)，避免重复加载。也可以从 [Release `sillytavern-v0.3.1`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.3.1) 下载[一键安装包](docs/SILLYTAVERN.md#一键安装包)，解压后运行其中的安装程序，一次装好前后端并开启服务端插件，不需要 Git。该压缩包是 0.3.1 标签时的内容，不含之后 `main` 上的改动；要装 `main`，用四条命令[从源码生成安装包并安装](docs/AGENT-INSTALL.md#sillytavern)。
 
-**TauriTavern（TT 酒馆）适配版**：同一个 UI 扩展也适配了 [TauriTavern](https://github.com/Darkatse/TauriTavern)。它把酒馆的 Node.js 后台换成了 Rust，不能运行服务端插件，所以在 TauriTavern 里只装 UI 扩展：在“安装扩展”中填入上面的 Git URL、分支留空即可，不需要 `plugins.js`、`npm ci` 和 `enableServerPlugins`。扩展检测到 TauriTavern 后自己完成抗截断的请求改写和回复还原，凭据与提示词转换仍由 TauriTavern 处理。支持非流式／流式抗截断、Unicode 转码和“继续”适配，不支持图片输入。本次适配在 `main` 源码中（2026-10-14），插件版本号仍为 0.3.1；[安装、与插件版的差别和验收范围](docs/SILLYTAVERN.md#tauritavern)。
+**TauriTavern（TT 酒馆）适配版**：同一个 UI 扩展也适配了 [TauriTavern](https://github.com/Darkatse/TauriTavern)。它把酒馆的 Node.js 后台换成了 Rust，不能运行服务端插件，所以在 TauriTavern 里只装 UI 扩展：在“安装扩展”中填入上面的 Git URL、分支留空即可，不需要 Node.js、`plugins.js`、`npm ci` 和 `enableServerPlugins`。扩展检测到 TauriTavern 后自己完成抗截断的请求改写和回复还原，凭据与提示词转换仍由 TauriTavern 处理。支持非流式／流式抗截断、Unicode 转码和“继续”适配，不支持图片输入。本次适配在 `main` 源码中（2026-10-14），插件版本号仍为 0.3.1；[安装、与插件版的差别和验收范围](docs/SILLYTAVERN.md#tauritavern)。
 
 ## 来源
 
@@ -280,7 +301,7 @@ npm run smoke -- --live
 
 使用原生 Vertex 面板插件时，请在插件面板的“输入转码”下拉框中选择 Unicode，无需这个桥接脚本，详见 [插件说明](docs/SILLYTAVERN.md)。两种连接方式分别由各自开关控制；不是跨进程同步设置。关闭预设中的重复转码，以免原文无法匹配。
 
-转码不是加密，不保证模型理解或改善生成结果，可能增加 token 用量和延迟。插件 UI v0.2.0（当时为独立勾选框）已完成配套酒馆安装、开关持久化及三种传输模式的短请求验收；当前 UI 0.3.0 下拉框在实际酒馆中的导入与持久化尚未验证。这些验收不证明长文本理解或抗截断收益，详见 [验收记录](docs/UNICODE-INPUT-AUDIT.md)。
+转码不是加密，不保证模型理解或改善生成结果，可能增加 token 用量和延迟。插件 UI v0.2.0（当时为独立勾选框）已完成配套酒馆安装、开关持久化及三种传输模式的短请求验收；0.3.0 起改用的下拉框在实际酒馆中的导入与持久化尚未验证。这些验收不证明长文本理解或抗截断收益，详见 [验收记录](docs/UNICODE-INPUT-AUDIT.md)。
 
 ## 图片输入（第二种混淆选项）
 

@@ -9,6 +9,7 @@
 - UI 扩展可单独在 [TauriTavern](https://github.com/Darkatse/TauriTavern) 中使用。TauriTavern 不能运行服务端插件，扩展检测到它后自己改写请求并还原回复：传输指令追加到酒馆自己的 Vertex 请求，原生 `tools`／`toolConfig` 通过“附加参数”写入，凭据、提示词转换、采样与思考参数仍由 TauriTavern 处理。
 - 两种抗截断模式都读取 TauriTavern 转发的 Google 原始流式事件，保留原始结束原因；非流式抗截断不开启参数流，完整并通过检查后一次交付。Unicode 转码与“继续”适配可用；图片输入不可用。Vertex“附加参数”写成 YAML 时本次走普通 Vertex 并显示原因。
 - `anti-truncation`、`vertex-text-stream`、`vertex-protocol`、`gemini4` 不再在模块顶部导入 `node:crypto`，以便在 WebView 中加载；网关与 SillyTavern 服务端插件的行为不变。
+- 新增[给 AI 助手的安装指引](docs/AGENT-INSTALL.md)，README 开头增加“安装哪一种”分流：如何判断 SillyTavern 与 TauriTavern、全程命令行的安装步骤、要先问用户的事项和核对方法。酒馆说明补上界面操作的命令行等价做法，并注明 Release 压缩包不含 `main` 上的改动、打包出的前端目录不能用于 TauriTavern。
 - 202 项本地测试通过。扩展在 Chromium 内核中用模拟酒馆通道完成 6 次请求，并在本机 TauriTavern 2.1.1 与 2.3.0 中完成加载；另有 6 次真实 Vertex 请求（Gemini 3.7 Flash）验证了流式、非流式、“继续”和输出上限截断；请求体由脚本按 TauriTavern 源码规则拼出，其自身后台发出的请求尚未验证，见[验收说明](docs/VALIDATION.md)。
 
 ## 未发布 — Gemini 4 Argon

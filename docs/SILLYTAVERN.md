@@ -2,27 +2,38 @@
 
 本集成由 UI 扩展和服务端插件组成。抗截断选项直接显示在 **API 连接 → Google Vertex AI** 面板下方，复用酒馆的模型、已保存凭据、地区和服务等级。服务端插件随酒馆启动，不另开端口，不需要运行独立网关。
 
+由 AI 助手代为安装时，先读[给 AI 助手的安装指引](AGENT-INSTALL.md)，那里有判断酒馆类型的方法和全程命令行的做法；本页多数步骤按界面操作书写。
+
 本扩展同时是 TauriTavern（TT 酒馆）的适配版：TauriTavern 不能运行服务端插件，只安装 UI 扩展即可，做法和差别见 [TauriTavern](#tauritavern)。
 
 适配依据：SillyTavern 1.19.0 的 `vertexai_form`、`SillyTavern.getContext()`、Google 提示词转换和原生响应读取逻辑。其他版本需要重新检查这些接口。
 
+## 选哪种装法
+
+- **一键安装包**：一次装好两半，自带查重、配置备份和失败回滚。装进去的不是 Git 副本，不会随酒馆的插件自动更新或扩展管理器更新。
+- **从 GitHub 安装**：两半分别安装，之后可以在酒馆里更新。
+
+两种只选一种，不要混装。
+
 ## 一键安装包
 
-安装包里有前端扩展、服务端插件和安装程序，运行一次就把两边装好，不需要 Git。需要 SillyTavern 1.19.0、Node.js 22.9+，并且酒馆至少启动过一次（已生成 `config.yaml`）。
+安装包里有前端扩展、服务端插件和安装程序，运行一次就把两边装好，不需要 Git。需要 SillyTavern 1.19.x（按 1.19.0 适配；其他版本安装程序只给出警告，装上后可能无法加载）、Node.js 22.9+，并且酒馆至少启动过一次（已生成 `config.yaml`）。
 
 1. 关闭酒馆，解压安装包。
 2. Windows 双击 `install-windows.cmd`，按提示把酒馆文件夹拖进窗口后回车；macOS／Linux／Termux 在终端运行 `sh install.sh 酒馆文件夹路径`。
 3. 启动酒馆、刷新网页，按下方“确认安装”检查。
 
-安装程序把服务端插件放到 `plugins/vertex-anti-truncation`，前端扩展放到 `public/scripts/extensions/third-party/vertex-anti-truncation`（所有用户可用），然后联网运行 `npm ci --ignore-scripts` 安装图片渲染依赖。依赖装不上只影响图片输入，联网后再运行一次即可补上；离线时可加 `--skip-deps` 跳过。`config.yaml` 中 `enableServerPlugins` 未开启时改为 `true`，修改前在同目录备份原文件。新文件先在酒馆目录内准备好再替换，替换出错时恢复原来的文件夹。
+在命令行里或由 AI 助手运行时，直接执行 `node install.mjs "酒馆文件夹路径"`，不要用 `install-windows.cmd`（它结尾会等待按键）。没有终端输入时安装程序不再等待确认，运行前先确认酒馆已关闭。成功时退出码为 0，失败时非 0 并打印“安装未完成：原因”。
+
+安装程序把服务端插件放到 `plugins/vertex-anti-truncation`，前端扩展放到 `public/scripts/extensions/third-party/vertex-anti-truncation`（所有用户可用），然后联网运行 `npm ci --ignore-scripts` 安装图片渲染依赖。依赖装不上只影响图片输入，联网后再运行一次即可补上；离线时可加 `--skip-deps` 跳过。`config.yaml` 中 `enableServerPlugins` 未开启时改为 `true`，修改前在同目录备份原文件。开启后 `plugins` 文件夹里已有的其他服务端插件也会随酒馆加载。新文件先在酒馆目录内准备好再替换，替换出错时恢复原来的文件夹。
 
 发现用 Git、扩展管理器或手动复制安装的副本（包括各用户自己的扩展目录）时，安装程序列出路径并停止，不覆盖也不删除，以免插件被加载两次。更新时下载新版安装包再运行一次；用安装包装的副本不是 Git 仓库，不会随酒馆的插件自动更新或扩展管理器更新。
 
-安装包在 [GitHub Release `sillytavern-v0.3.1`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.3.1) 下载 `vertex-anti-truncation-sillytavern-0.3.1.zip`，可用同页的 `SHA256.txt` 校验。也可以在本仓库运行 `npm run package:sillytavern`，生成的 `dist/sillytavern` 就是安装包内容。
+安装包在 [GitHub Release `sillytavern-v0.3.1`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.3.1) 下载 `vertex-anti-truncation-sillytavern-0.3.1.zip`，可用同页的 `SHA256.txt` 校验。该压缩包是 0.3.1 标签时的内容，不含之后 `main` 上的改动（如 Gemini 4 适配），而版本号同为 0.3.1。要装 `main`，在本仓库运行 `npm run package:sillytavern`，生成的 `dist/sillytavern` 就是安装包内容；打包不需要先安装依赖。
 
 ## 从 GitHub 安装
 
-需要 SillyTavern 1.19.0 和 Node.js 22.9+。同一个仓库同时提供前端扩展和服务端插件，但需要安装到两个不同的位置。
+需要 SillyTavern 1.19.x（按 1.19.0 适配）和 Node.js 22.9+。克隆或 `npm ci` 失败通常是访问 GitHub、npm 的网络问题，配置好代理后重试即可。同一个仓库同时提供前端扩展和服务端插件，但需要安装到两个不同的位置。
 
 ### 1. 安装前端扩展
 
@@ -31,6 +42,8 @@
 ```text
 https://github.com/ken050210/vertex-streaming-anti-truncation
 ```
+
+命令行的等价做法是把仓库克隆到扩展目录：只给某个用户用时是 `data/<用户名>/extensions/vertex-streaming-anti-truncation`（默认用户名为 `default-user`），给所有人用时是 `public/scripts/extensions/third-party/vertex-streaming-anti-truncation`。
 
 分支或标签框**留空**，跟随仓库默认分支；第 2 步的服务端插件同样从默认分支安装，两端版本一致。不要在这里填写旧标签 `sillytavern-v0.1.0`：服务端仍是默认分支的新版本，版本检查会失败，面板提示“服务端插件未就绪或版本不匹配”。按需选择“只给我安装”或“给所有人安装”。
 
@@ -49,13 +62,13 @@ cd plugins/vertex-streaming-anti-truncation
 npm ci --ignore-scripts
 ```
 
-跳过这一步时抗截断和 Unicode 转码仍可使用，但选择图片输入会返回 `image_renderer_unavailable`（HTTP 503）；补装后需重启酒馆。确认酒馆 `config.yaml` 中 `enableServerPlugins: true`，然后重启酒馆并刷新网页。
+运行 `npm ci` 前确认上一条 `cd` 成功、当前目录是插件文件夹；在酒馆根目录运行会重装酒馆自己的依赖。跳过这一步时抗截断和 Unicode 转码仍可使用，但选择图片输入会返回 `image_renderer_unavailable`（HTTP 503）；补装后需重启酒馆。确认酒馆 `config.yaml` 中 `enableServerPlugins: true`，然后重启酒馆并刷新网页。手动修改时先备份该文件，把已有的那一行原位改成 `true`，不要在末尾再追加一行同名的键。
 
 酒馆的“安装扩展”窗口只安装浏览器端文件，不能替代这一步。只安装前端时，面板会显示服务端插件未就绪；不要启用抗截断，先完成服务端安装。
 
 ### 3. 确认安装
 
-进入 **API 连接 → Google Vertex AI → 抗截断传输**，点击“检查插件连接”，应显示“服务端插件已就绪”。此检查不访问 Google、不调用模型，也不检查图片渲染依赖是否已安装。
+进入 **API 连接 → Google Vertex AI → 抗截断传输**，点击“检查插件连接”，应显示“服务端插件已就绪”。此检查不访问 Google、不调用模型，也不检查图片渲染依赖是否已安装。命令行的等价检查是请求 `http://127.0.0.1:8000/api/plugins/vertex-anti-truncation/status`（端口以 `config.yaml` 为准；未开启账号和基础认证时可用），返回 `{"id":"vertex-anti-truncation","version":"0.3.1","ready":true}` 即服务端插件已加载。
 
 默认关闭。选择流式抗截断时，还需开启酒馆原有的流式传输选项。
 
@@ -73,9 +86,10 @@ Gemini 4 Argon 的适配位于 2026-10-14 的 `main` 源码，尚未包含在现
 在本仓库运行：
 
 ```sh
-npm run verify
 npm run package:sillytavern
 ```
+
+打包只用 Node.js 自带模块，全新克隆后可以直接运行。`npm run verify` 是可选的自检，需要先 `npm ci --ignore-scripts`。
 
 然后运行 `dist/sillytavern` 里的安装程序（见上方“一键安装包”），或手动把生成的两个目录分别复制到酒馆：
 
@@ -83,6 +97,8 @@ npm run package:sillytavern
 | --- | --- |
 | `dist/sillytavern/server/vertex-anti-truncation` | `plugins/vertex-anti-truncation` |
 | `dist/sillytavern/extension/vertex-anti-truncation` | `public/scripts/extensions/third-party/vertex-anti-truncation` |
+
+上表的前端目录只用于 SillyTavern。它不含 TauriTavern 需要的模块，不要复制到 TauriTavern，那里要用完整仓库（见 [TauriTavern](#tauritavern)）。
 
 复制后在 `plugins/vertex-anti-truncation` 目录运行 `npm ci --ignore-scripts` 安装图片渲染依赖。服务端需启用 `enableServerPlugins: true`，然后重启酒馆、刷新网页。
 
@@ -125,7 +141,9 @@ Express、Flex、Priority 需要将地区设为 `global`。完整服务账号的
 
 ### 安装
 
-在 TauriTavern 的 **扩展程序 → 安装扩展** 中填入本仓库的 Git URL，分支留空。不需要 `plugins.js`、`npm ci` 和 `enableServerPlugins`；一键安装包只面向 SillyTavern，不用于 TauriTavern。
+在 TauriTavern 的 **扩展程序 → 安装扩展** 中填入本仓库的 Git URL，分支留空。不需要 Node.js、`plugins.js`、`npm ci` 和 `enableServerPlugins`；一键安装包只面向 SillyTavern，不用于 TauriTavern。
+
+不经界面安装时，在 TauriTavern 关闭的状态下把完整仓库克隆到 `<数据目录>/default-user/extensions/vertex-streaming-anti-truncation`。便携版的数据目录是程序旁边的 `data`，安装版在系统应用数据目录下的 `com.tauritavern.client/data`；`data` 的上一级有 `tauritavern-runtime.json` 时以其中的 `data_root` 为准。这种装法已在 TauriTavern 2.3.0 中验证能加载，界面里的“安装扩展”尚未由本项目验证。安装包或 `dist/` 里的前端目录不含 TauriTavern 需要的模块，拷进去扩展会加载失败。
 
 面板位置不变：**API 连接 → Google Vertex AI → 抗截断传输**。面板底部显示“TauriTavern：抗截断由本扩展直接完成，无需服务端插件；不支持图片输入。”即已进入该模式，此时没有“检查插件连接”按钮。
 
@@ -151,7 +169,7 @@ Express、Flex、Priority 需要将地区设为 `global`。完整服务账号的
 
 ## 卸载
 
-先将抗截断设为“关闭”，再禁用 UI 扩展，将本插件服务端目录移到酒馆 `plugins` 目录之外并重启。不要删除酒馆凭据或其他插件。
+先将抗截断设为“关闭”，再禁用 UI 扩展，将本插件服务端目录移到酒馆 `plugins` 目录之外并重启。服务端目录用安装包装的叫 `vertex-anti-truncation`，用 Git 装的叫 `vertex-streaming-anti-truncation`；扩展目录下的同名文件夹也可一并移走。TauriTavern 只需移走扩展目录下的文件夹。不要删除酒馆凭据或其他插件。
 
 接口参考：[UI Extensions](https://docs.sillytavern.app/for-contributors/writing-extensions/)、[Server Plugins](https://docs.sillytavern.app/for-contributors/server-plugins/)。
 
@@ -180,5 +198,7 @@ Unicode 转码在浏览器中、抗截断分流之前执行；普通／旁路请
 ### 版本与验收
 
 TauriTavern 适配是 2026-10-14 的 `main` 源码更新，不改变版本号，也不要求更新 SillyTavern 上已安装的服务端插件；在 SillyTavern 中扩展的行为不变。
+
+0.3.1 之后 `main` 上的 Gemini 4 与 TauriTavern 改动都没有更改版本号，面板的版本检查分不出新旧。要确认装到的代码是否含这些改动，看它是不是来自 `main` 的对应提交，不要只看版本号。
 
 当前前端与服务端均为 0.3.1，对应标签／Release `sillytavern-v0.3.1`，包含“继续”适配、流式修复和一键安装包。请同时更新前后端，以免版本检查失败。0.3.0 对应标签 `sillytavern-v0.3.0`（与网关 `v0.7.0` 为同一提交）；0.2.0 未发布标签；上方 v0.1.0 标签／Release 不含 Unicode 与图片输入。Unicode 转码在 v0.2.0（当时为独立勾选框）时完成的短请求验收见[验收记录](UNICODE-INPUT-AUDIT.md)（英文）。0.3.1 的离线验证、6 次真实后端测试、流式修复验证和剩余验收范围见[验收说明](VALIDATION.md)。
