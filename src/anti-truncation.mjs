@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { supportsNativeTextStream } from "./vertex-native.mjs";
 // Restoration failures describe one reply, not the connection, and keep their code.
 import { isObject, protocolError as failure, trafficType, transformSse } from "./wire.mjs";
@@ -34,7 +33,7 @@ export function prepareAntiTruncation(payload, enabled, streamArguments = false,
         message.tool_calls?.length || message.function_call)) return skip("tool-history");
     const requested = streamArguments && payload.stream === true;
     const nativeStreaming = requested && supportsNativeTextStream(payload);
-    const toolName = "router_emit_" + randomBytes(12).toString("hex");
+    const toolName = "router_emit_" + Array.from(crypto.getRandomValues(new Uint8Array(12)), byte => byte.toString(16).padStart(2, "0")).join("");
     return {
         toolName,
         nativeStreaming,

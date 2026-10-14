@@ -2,6 +2,15 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
+## Unreleased — TauriTavern adaptation
+
+Available from `main` (2026-10-14). No new version tag; the plugin version stays 0.3.1. See the [TauriTavern section (Chinese)](docs/SILLYTAVERN.md#tauritavern).
+
+- The UI extension now works on its own in [TauriTavern](https://github.com/Darkatse/TauriTavern), which cannot run the server plugin. There the extension shapes the request and restores the reply itself: the transport instruction is appended to Tavern's own Vertex request and the native `tools`/`toolConfig` travel in its Additional Parameters. TauriTavern keeps the credentials, prompt conversion, sampling and thinking settings.
+- Both transport modes read Google's raw streaming events as TauriTavern forwards them, so native finish codes are kept; buffered mode does not stream arguments and delivers one checked, complete reply. Unicode input and the Continue adaptation work; image input does not. YAML Additional Parameters for Vertex cannot be merged, so that request uses plain Vertex and the panel says why.
+- `anti-truncation`, `vertex-text-stream`, `vertex-protocol` and `gemini4` no longer import `node:crypto` at module top level, so a WebView can load them. Gateway and SillyTavern server-plugin behaviour is unchanged.
+- 202 local tests passed. The extension completed six requests against a simulated Tavern route in a Chromium engine and loaded in a local TauriTavern 2.1.1 and 2.3.0. Six live Vertex requests (Gemini 3.7 Flash) covered streaming, buffered, Continue and output-limit cases; their bodies were built by a script following TauriTavern's source, so a request sent by its own backend remains unverified. See [validation](docs/VALIDATION.en.md).
+
 ## Unreleased — Gemini 4 Argon
 
 Available from `main` (2026-10-14). No new version tag or Release ZIP; the existing `sillytavern-v0.3.1` package does not include these changes. Use the [source update instructions](docs/GEMINI4.en.md#updating).

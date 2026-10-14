@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { SIGNATURE_ID_PREFIX, mapFinishReason, translateUsage } from "./vertex-native.mjs";
 import { isObject, protocolError, sseData, transformSse } from "./wire.mjs";
 import { isGemini4Argon, encodeGemini4ToolId } from "./gemini4.mjs";
@@ -15,7 +14,7 @@ function candidateMessage(candidate, model) {
       // FunctionCall.args is optional: a call to a parameterless function may omit it.
       const args = fc.args ?? {};
       if (fc.partialArgs || typeof fc.name !== "string" || !isObject(args)) throw protocolError("invalid_native_tool");
-      (message.tool_calls ??= []).push({ id: isGemini4Argon(model) && fc.id ? encodeGemini4ToolId(part) : part.thoughtSignature ? SIGNATURE_ID_PREFIX + part.thoughtSignature : "call_" + randomUUID(),
+      (message.tool_calls ??= []).push({ id: isGemini4Argon(model) && fc.id ? encodeGemini4ToolId(part) : part.thoughtSignature ? SIGNATURE_ID_PREFIX + part.thoughtSignature : "call_" + crypto.randomUUID(),
         type: "function", function: { name: fc.name, arguments: JSON.stringify(args) } });
     }
   }
@@ -29,7 +28,7 @@ export function translateNativeCompletion(native, model) {
   const promptBlockReason = !candidates?.length && native.promptFeedback?.blockReason;
   if (promptBlockReason) candidates = [{ finishReason: "SAFETY" }];
   if (!Array.isArray(candidates) || !candidates.length) throw protocolError("invalid_native_completion");
-  return { id: "chatcmpl-" + randomUUID(), object: "chat.completion", created: Math.floor(Date.now() / 1000), model,
+  return { id: "chatcmpl-" + crypto.randomUUID(), object: "chat.completion", created: Math.floor(Date.now() / 1000), model,
     choices: candidates.map((c, i) => {
       const message = candidateMessage(c, model);
       if (!c.finishReason) throw protocolError("incomplete_native_completion");
@@ -41,7 +40,7 @@ export function translateNativeCompletion(native, model) {
 // thought signatures are preserved while normal text is forwarded immediately.
 // The empty-choices usage chunk follows OpenAI's stream_options.include_usage.
 export function wrapNativeStream(response, model, onUsage = () => {}, includeUsage = true) {
-  const id = "chatcmpl-" + randomUUID(), created = Math.floor(Date.now() / 1000);
+  const id = "chatcmpl-" + crypto.randomUUID(), created = Math.floor(Date.now() / 1000);
   const states = new Map();
   let usage;
   return transformSse(response, ({ data }, emit) => {

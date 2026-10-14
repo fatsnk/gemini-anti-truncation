@@ -2,6 +2,8 @@
 
 本集成由 UI 扩展和服务端插件组成。抗截断选项直接显示在 **API 连接 → Google Vertex AI** 面板下方，复用酒馆的模型、已保存凭据、地区和服务等级。服务端插件随酒馆启动，不另开端口，不需要运行独立网关。
 
+本扩展同时是 TauriTavern（TT 酒馆）的适配版：TauriTavern 不能运行服务端插件，只安装 UI 扩展即可，做法和差别见 [TauriTavern](#tauritavern)。
+
 适配依据：SillyTavern 1.19.0 的 `vertexai_form`、`SillyTavern.getContext()`、Google 提示词转换和原生响应读取逻辑。其他版本需要重新检查这些接口。
 
 ## 一键安装包
@@ -117,6 +119,30 @@ Express、Flex、Priority 需要将地区设为 `global`。完整服务账号的
 - 所有生成请求沿用酒馆登录和 CSRF 防护。服务端只向固定 Google 官方域名发送请求；不会回显上游错误正文、密钥或提示词。
 - 前端依赖当前版本酒馆的全局 `fetch` 调用点；如果其他扩展在之后替换 `fetch` 且不向前传递，可能影响集成。升级酒馆或相关扩展后需复查。
 
+## TauriTavern
+
+本节说明为 [TauriTavern](https://github.com/Darkatse/TauriTavern)（TT 酒馆）做的适配版。TauriTavern 把酒馆的 Node.js 后台换成了 Rust，不能运行服务端插件。在 TauriTavern 中只安装 UI 扩展：扩展检测到 TauriTavern 后，自己完成抗截断的请求改写和回复还原；凭据、提示词转换、采样与思考参数仍由 TauriTavern 处理。这是 `main` 源码更新，尚无新的版本标签。
+
+### 安装
+
+在 TauriTavern 的 **扩展程序 → 安装扩展** 中填入本仓库的 Git URL，分支留空。不需要 `plugins.js`、`npm ci` 和 `enableServerPlugins`；一键安装包只面向 SillyTavern，不用于 TauriTavern。
+
+面板位置不变：**API 连接 → Google Vertex AI → 抗截断传输**。面板底部显示“TauriTavern：抗截断由本扩展直接完成，无需服务端插件；不支持图片输入。”即已进入该模式，此时没有“检查插件连接”按钮。
+
+### 与 SillyTavern 插件版的差别
+
+- 请求仍发往酒馆自己的 `/api/backends/chat-completions/generate`。扩展在消息末尾追加传输指令，并通过 TauriTavern 的“附加参数”（`custom_include_body`）写入原生 `tools` 与 `toolConfig`。
+- 两种模式都经 TauriTavern 的流式通道读取 Google 的原始事件，上游为 `streamGenerateContent`。原因是它的非流式返回只保留合并后的结束原因，无法据此识别被截断的回复。**非流式抗截断**不开启参数流，等回复完整并通过检查后一次交付；**流式抗截断**在酒馆开启流式传输时开启 `streamFunctionCallArguments` 并逐段显示。每次仍只有一个上游请求。
+- 图片输入不可用（文字转图片依赖服务端渲染组件），“输入转码”下拉框不显示这两项。Unicode 转码和“继续”适配与插件版相同。
+- Vertex 的“附加参数”为空或 JSON 对象时会与上述字段合并；写成 YAML 时无法合并，本次使用普通 Vertex，面板显示原因。改写为 JSON 对象即可。
+- 还原失败时，流式回复以错误事件结束，非流式返回 HTTP 502，面板显示错误代码，不重试。TauriTavern 自己报告的请求错误（凭据、配额等）仍按它原有方式显示为回复文本。
+- Gemini 4 Argon 的思考等级与采样参数由 TauriTavern 处理，需要所用版本已收录该模型（2026-10-14 核对：`dev` 分支已收录，稳定版 2.3.0 未收录）。输出额度按流式上限 65,536 检查，超限返回 `gemini4_long_decode_required`。
+- 8 MiB 请求大小限制、旁路条件与“范围与边界”中的其余说明同样适用。
+
+### 依据与验证状态
+
+依据 TauriTavern v2.1.1、v2.3.0 与 `main`（2026-10-10）源码核对：附加参数作用于最终请求体，Vertex 流式事件原样转发给前端。`test/tauritavern.test.mjs` 用模拟的酒馆通道覆盖请求改写、逐段还原、完整交付、截断与损坏检测、取消、“继续”和酒馆错误文本。另用 SillyTavern 已保存的凭据向 Vertex 发送 6 次真实请求，流式、非流式、“继续”和输出上限截断均符合预期；这些请求体由脚本按 TauriTavern 源码规则拼出，不是它的后台发出的。范围与未覆盖项见[验收说明](VALIDATION.md)。
+
 ## 验证
 
 `test/sillytavern.test.mjs` 使用模拟上游，检查原请求保留、CSRF/取消信号传递、按用户读取选定凭据、提示词参数保留、逐段首字交付、缓冲回复格式、截断/损坏检测以及一次请求原则。它不调用付费模型。
@@ -152,5 +178,7 @@ Unicode 转码在浏览器中、抗截断分流之前执行；普通／旁路请
 服务端首次安装或更新后，在服务端插件目录运行 `npm ci --ignore-scripts` 安装图片渲染依赖，再重启酒馆。手动打包也需要这一步；字体及许可证随服务端包提供。前端扩展目录不需要 npm 安装。
 
 ### 版本与验收
+
+TauriTavern 适配是 2026-10-14 的 `main` 源码更新，不改变版本号，也不要求更新 SillyTavern 上已安装的服务端插件；在 SillyTavern 中扩展的行为不变。
 
 当前前端与服务端均为 0.3.1，对应标签／Release `sillytavern-v0.3.1`，包含“继续”适配、流式修复和一键安装包。请同时更新前后端，以免版本检查失败。0.3.0 对应标签 `sillytavern-v0.3.0`（与网关 `v0.7.0` 为同一提交）；0.2.0 未发布标签；上方 v0.1.0 标签／Release 不含 Unicode 与图片输入。Unicode 转码在 v0.2.0（当时为独立勾选框）时完成的短请求验收见[验收记录](UNICODE-INPUT-AUDIT.md)（英文）。0.3.1 的离线验证、6 次真实后端测试、流式修复验证和剩余验收范围见[验收说明](VALIDATION.md)。

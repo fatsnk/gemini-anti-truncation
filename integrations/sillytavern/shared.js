@@ -36,7 +36,7 @@ export function bypassReason(body, mode) {
 
 // ST 1.19 exposes a settings event, but not a generation-URL override. Intercept
 // only its same-origin Vertex POST; preserve the original fetch for everything else.
-export function createFetchInterceptor(originalFetch, { origin, getMode, getUnicodeInput = () => false, getImageInput = () => "off", getUserFloor = () => "", ensureBackend = async () => true, onStatus = () => {} }) {
+export function createFetchInterceptor(originalFetch, { origin, getMode, getUnicodeInput = () => false, getImageInput = () => "off", getUserFloor = () => "", ensureBackend = async () => true, onStatus = () => {}, direct }) {
   return async function vertexFetch(input, init) {
     let url;
     try { url = new URL(typeof input === "string" || input instanceof URL ? input : input.url, origin); }
@@ -68,7 +68,15 @@ export function createFetchInterceptor(originalFetch, { origin, getMode, getUnic
       if (!["current-turn", "all"].includes(imageMode) || reason) { onStatus({ error: "image_input_requires_supported_request", bypass: reason }); throw new Error("image_input_requires_supported_request"); }
       body.vertex_image_input = imageMode;
     }
-    let payload = reason ? null : JSON.stringify({ ...body, vertex_anti_truncation: mode });
+    // Without a server plugin (TauriTavern), `direct` adds the transport to ST's
+    // own request here and restores the reply below.
+    let prepared;
+    if (direct && !reason) {
+      try { prepared = direct.prepare(body, mode); }
+      catch (error) { onStatus({ error: error.code || "invalid_request" }); throw error; }
+      reason = prepared.bypass ?? null;
+    }
+    let payload = reason ? null : JSON.stringify(prepared?.body ?? { ...body, vertex_anti_truncation: mode });
     // The plugin rejects bodies over its limit; keep ST's own route for plain
     // anti-truncation. Image input never falls back to plaintext.
     if (payload && !imageEnabled && new TextEncoder().encode(payload).length > BODY_LIMIT) reason = "too-large";
@@ -80,7 +88,7 @@ export function createFetchInterceptor(originalFetch, { origin, getMode, getUnic
     }
     onStatus({ mode, bypass: reason, unicode });
     if (reason) payload = JSON.stringify(body);
-    const target = reason ? url.href : new URL(`${PLUGIN_PATH}/generate`, origin).href;
+    const target = reason || direct ? url.href : new URL(`${PLUGIN_PATH}/generate`, origin).href;
     let response;
     try {
       if (input instanceof Request) {
@@ -92,9 +100,10 @@ export function createFetchInterceptor(originalFetch, { origin, getMode, getUnic
         });
         response = await originalFetch(redirected);
       } else {
-        response = await originalFetch(reason ? input : `${PLUGIN_PATH}/generate`, { ...init, body: payload });
+        response = await originalFetch(reason || direct ? input : `${PLUGIN_PATH}/generate`, { ...init, body: payload });
       }
     } catch (error) { onStatus({ error: "network" }); throw error; }
+    if (direct && !reason) response = await direct.restore(response, prepared, init?.signal ?? (input instanceof Request ? input.signal : undefined));
     if (!response.ok) {
       // Plugin errors carry a fixed code; ST's own route keeps the HTTP status.
       const code = reason ? undefined : await response.clone().json().then(data => data?.error?.code, () => undefined);

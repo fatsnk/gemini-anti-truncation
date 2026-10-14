@@ -1,6 +1,5 @@
 // Vertex Gemini 4 Argon: https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-argon
 // Keep these rules model-specific; earlier Gemini versions retain their budget semantics.
-import { createHash } from "node:crypto";
 export const isGemini4Argon = model => /^(?:google\/|publishers\/google\/models\/)?gemini-4-argon(?:@[a-z0-9-]+)?$/i.test(model || "");
 const invalid = (code, message) => Object.assign(new Error(message), { status: 400, code });
 
@@ -55,8 +54,10 @@ export function encodeGemini4ToolId(part) {
 }
 
 export function gemini4ToolMetadata(id) {
+  // The TauriTavern extension loads this module in a WebView, so node:crypto is
+  // resolved here, on the gateway-only tool-history path, not imported at the top.
   if (typeof id === "string" && id.startsWith("vtx.")) return {
-    id: "call_" + createHash("sha256").update(id).digest("hex").slice(0, 24), signature: id.slice(4),
+    id: "call_" + process.getBuiltinModule("node:crypto").createHash("sha256").update(id).digest("hex").slice(0, 24), signature: id.slice(4),
   };
   if (typeof id !== "string" || !id.startsWith("vtx4.")) return { id };
   try {

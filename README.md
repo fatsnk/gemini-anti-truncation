@@ -12,6 +12,8 @@
 
 在酒馆“安装扩展”的 Git URL 输入框填入 `https://github.com/ken050210/vertex-streaming-anti-truncation`，分支留空。**首次还需在酒馆根目录执行** `node plugins.js install https://github.com/ken050210/vertex-streaming-anti-truncation` 安装配套服务端插件，再在 `plugins/vertex-streaming-anti-truncation` 目录运行 `npm ci --ignore-scripts` 安装图片输入所需的渲染依赖，启用 `enableServerPlugins` 并重启酒馆。仅安装前端无法完成抗截断传输；已有手动安装请先阅读[迁移说明](docs/SILLYTAVERN.md#更新与已有手动安装)，避免重复加载。也可以从 [Release `sillytavern-v0.3.1`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.3.1) 下载[一键安装包](docs/SILLYTAVERN.md#一键安装包)，解压后运行其中的安装程序，一次装好前后端并开启服务端插件，不需要 Git。
 
+**TauriTavern（TT 酒馆）适配版**：同一个 UI 扩展也适配了 [TauriTavern](https://github.com/Darkatse/TauriTavern)。它把酒馆的 Node.js 后台换成了 Rust，不能运行服务端插件，所以在 TauriTavern 里只装 UI 扩展：在“安装扩展”中填入上面的 Git URL、分支留空即可，不需要 `plugins.js`、`npm ci` 和 `enableServerPlugins`。扩展检测到 TauriTavern 后自己完成抗截断的请求改写和回复还原，凭据与提示词转换仍由 TauriTavern 处理。支持非流式／流式抗截断、Unicode 转码和“继续”适配，不支持图片输入。本次适配在 `main` 源码中（2026-10-14），插件版本号仍为 0.3.1；[安装、与插件版的差别和验收范围](docs/SILLYTAVERN.md#tauritavern)。
+
 ## 来源
 
 合成工具传输方案参考 [Xeltra233](https://github.com/Xeltra233) 的 [Antigravity-gateway](https://github.com/Xeltra233/Antigravity-gateway)。

@@ -28,6 +28,7 @@
 - 数字 `thinking_budget` / `thinkingBudget` 和显式 `cached_content` 返回本地 400，并给出固定错误码；不静默丢弃用户的预算或缓存语义。
 - 去掉 Google 迁移清单要求移除的采样参数、惩罚参数与 `n`。原有预填充转 USER 开关扩展到 Argon；仅转换末尾纯文本，保留工具与思考历史。
 - 原生酒馆插件独立处理 Argon 思考等级，不依赖旧酒馆版本只认识 Gemini 2.5/3 的预算函数。需要用户所在酒馆能够选择或输入该模型。
+- TauriTavern 适配版中，Argon 的思考等级与采样参数由 TauriTavern 自己处理，需要其版本已收录该模型；扩展只检查输出上限。见 [TauriTavern 说明](SILLYTAVERN.md#tauritavern)。
 - 原生工具调用 ID 与思考签名通过不透明的 `vtx4.` 工具 ID 一起往返。客户端回传工具结果时必须完整保留服务返回的 ID。
 - 每次上游请求仍只调用一次模型（已有显式开启的错误重试除外）。未实现 continuation-token 长解码：上游非流式最多 32,768 token，流式最多 65,536 token；非流式抗截断即使向客户端输出 SSE，也按 32,768 上限检查。超限返回 `gemini4_long_decode_required`，不自动增加输出额度或追加付费请求。thinking 和正文共享该额度，短额度可能先被思考用完。
 - 复杂请求可能需更长等待，可按需把已有超时设置调至 900,000 ms 或更高；升级不会改写旧超时。

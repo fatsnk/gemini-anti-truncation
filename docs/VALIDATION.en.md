@@ -4,6 +4,33 @@
 
 Local fixtures, live standalone requests and historical router checks cover different parts of the system.
 
+## TauriTavern (2026-10-14, main source update)
+
+`npm run verify` passed the check of 100 release files and 202 tests. The 11 new tests in `test/tauritavern.test.mjs` use a simulated Tavern route and cover: the request staying on Tavern's own route with its headers and abort signal, native tool fields in Additional Parameters, merging existing JSON parameters and bypassing YAML ones, piece-by-piece restoration (the first piece arrives before the upstream ends), JSON and buffered-SSE delivery, native finish codes for length limits, five interrupted/malformed/upstream-error cases that neither report success nor echo provider error text, Tavern's own error text, cancellation without an error event, Continue, the Argon output limit before sending, and the absence of Node-only imports in everything the extension loads.
+
+Browser engine: the real extension entry `index.js` was loaded in the Claude desktop app's built-in Chromium browser with stand-ins for the host globals and Tavern's route. The panel offered only off/Unicode input and no plugin check button. Six simulated requests covered streamed restoration, buffered JSON, buffered SSE, an interrupted stream (error event), an interrupted buffered reply (HTTP 502 with the code in the panel) and Tavern's error text.
+
+Local TauriTavern (Windows portable), once on 2.1.1 and once on 2.3.0: after copying the extension into the user's extension folder and starting the app, Tavern's saved settings contained this extension's defaults (removed before the 2.3.0 start and written again after it), so the entry module and its imports evaluated in WebView2 and mounted on the Vertex panel. No generation request was sent there and no credentials or connection settings were changed.
+
+The user confirmed by eye that the transport selector appears on the Vertex panel in TauriTavern 2.3.0.
+
+Live Vertex requests (approved by the user, reusing SillyTavern's saved service account without changing it): six, on Gemini 3.7 Flash, global, Standard, at most 1024 output tokens each, fixed short prompts, no retries, about 6.8k tokens in total. Interception, request shaping and restoration ran this repository's code. TauriTavern's Rust backend was not in the loop: a temporary script built the Vertex body by the rules of its v2.3.0 source (consecutive same-role turns kept separate, ten safety settings, thinking level, Additional Parameters replacing top-level fields) and forwarded Google's events in its route's framing. Google accepted all six bodies; every event carried `role` and fields such as `modelVersion`/`responseId`, and none was mistaken for Tavern's error text.
+
+| Request | Result |
+| --- | --- |
+| Streaming transport, Tavern streaming | 309 characters identical to the sample; nine argument pieces from Google, eight content-bearing reads, first content at about 2.70 s over about 855 ms; STOP, restored=true |
+| Buffered transport, Tavern non-streaming | One complete function call over the streaming route; JSON content identical, stop/STOP, thoughts kept |
+| Buffered transport, Tavern streaming | Identical, delivered in one read, STOP |
+| Continue (nudge prompt), streaming | Only the suffix (a newline plus the last six lines, equal to the sample when appended), nothing repeated; the panel reported the suffix request |
+| Output limit 300, streaming | 329 characters delivered, identical to what the model had written into the arguments and a prefix of the sample; the ending stayed MAX_TOKENS, no STOP |
+| Output limit 300, non-streaming | Google returned thoughts and MAX_TOKENS without a function call; the extension returned empty content with `length`/MAX_TOKENS, not a completed reply |
+
+These are single short samples, not benchmarks of speed, long output or open-ended writing.
+
+Read from source, not observed at runtime: TauriTavern v2.1.1, v2.3.0 and `main` (2026-10-10) all apply Additional Parameters after building the upstream body and forward Vertex streaming events unchanged.
+
+Not covered: a live request sent by TauriTavern's own backend (needs Vertex credentials saved there) and its piece-by-piece display on the page, Express/Flex/Priority, installing from Git through the extension manager, Android/iOS/macOS WebViews, and Gemini 4 Argon in TauriTavern (only its `dev` branch listed the model when checked).
+
 ## Gemini 4 Argon (2026-10-14, main source update)
 
 Verification passed 191 local tests. After the documentation update, the pre-commit check passed for 98 release files. New coverage includes thinking-level mapping, explicit config precedence, rejection before inference for numeric budgets/caches/long-decode limits, prefills, native function-call ID/signature round trips, and an Express/OAuth × transport × JSON/SSE mock matrix. The SillyTavern package was generated without installing it into the existing Tavern.

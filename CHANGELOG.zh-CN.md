@@ -2,6 +2,15 @@
 
 中文 | [English](CHANGELOG.md)
 
+## 未发布 — TauriTavern（TT 酒馆）适配版
+
+2026-10-14 的 `main` 源码更新，尚无新版本标签；插件版本号仍为 0.3.1。说明见 [TauriTavern](docs/SILLYTAVERN.md#tauritavern)。
+
+- UI 扩展可单独在 [TauriTavern](https://github.com/Darkatse/TauriTavern) 中使用。TauriTavern 不能运行服务端插件，扩展检测到它后自己改写请求并还原回复：传输指令追加到酒馆自己的 Vertex 请求，原生 `tools`／`toolConfig` 通过“附加参数”写入，凭据、提示词转换、采样与思考参数仍由 TauriTavern 处理。
+- 两种抗截断模式都读取 TauriTavern 转发的 Google 原始流式事件，保留原始结束原因；非流式抗截断不开启参数流，完整并通过检查后一次交付。Unicode 转码与“继续”适配可用；图片输入不可用。Vertex“附加参数”写成 YAML 时本次走普通 Vertex 并显示原因。
+- `anti-truncation`、`vertex-text-stream`、`vertex-protocol`、`gemini4` 不再在模块顶部导入 `node:crypto`，以便在 WebView 中加载；网关与 SillyTavern 服务端插件的行为不变。
+- 202 项本地测试通过。扩展在 Chromium 内核中用模拟酒馆通道完成 6 次请求，并在本机 TauriTavern 2.1.1 与 2.3.0 中完成加载；另有 6 次真实 Vertex 请求（Gemini 3.7 Flash）验证了流式、非流式、“继续”和输出上限截断；请求体由脚本按 TauriTavern 源码规则拼出，其自身后台发出的请求尚未验证，见[验收说明](docs/VALIDATION.md)。
+
 ## 未发布 — Gemini 4 Argon
 
 2026-10-14 的 `main` 源码更新，尚无新版本标签或 Release ZIP；现有 `sillytavern-v0.3.1` 包不含以下改动。请按[源码升级说明](docs/GEMINI4.md#升级方式)更新。

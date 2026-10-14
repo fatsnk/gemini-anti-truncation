@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { mapFinishReason, translateUsage } from "./vertex-native.mjs";
 import { isObject, protocolError, sseData, transformSse } from "./wire.mjs";
 
@@ -9,7 +8,7 @@ const fail = suffix => { throw protocolError("anti_truncation_native_" + suffix)
 // The empty-choices usage chunk follows OpenAI's stream_options.include_usage.
 export function wrapNativeTextStream(response, toolName, model, onNativeUsage = () => {}, includeUsage = true) {
   if (!response.ok || !response.body) return response;
-  const id = "chatcmpl-" + randomUUID(), created = Math.floor(Date.now() / 1000);
+  const id = "chatcmpl-" + crypto.randomUUID(), created = Math.floor(Date.now() / 1000);
   let started = false, stringStarted = false, stringClosed = false, callClosed = false;
   let fullArgs = false, terminal = false, failed = false, usage;
   const chunk = (emit, delta, finish_reason = null, nativeReason) => emit(sseData({
@@ -22,7 +21,7 @@ export function wrapNativeTextStream(response, toolName, model, onNativeUsage = 
     if (!started) {
       if (fc.name !== toolName) fail("missing_name");
       started = true;
-      chunk(emit, { role: "assistant", tool_calls: [{ index: 0, id: "call_" + randomUUID(), type: "function", function: { name: toolName, arguments: "" } }] });
+      chunk(emit, { role: "assistant", tool_calls: [{ index: 0, id: "call_" + crypto.randomUUID(), type: "function", function: { name: toolName, arguments: "" } }] });
     }
     if (fc.args != null) {
       if (stringStarted || fullArgs || !isObject(fc.args) || typeof fc.args.content !== "string") fail("invalid_args");

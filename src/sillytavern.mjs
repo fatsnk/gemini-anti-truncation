@@ -106,6 +106,19 @@ export function toSillyTavernStream(response, getNativeUsage = () => undefined) 
   });
 }
 
+// A checked, complete reply in the shape ST asked for. Also used in a WebView,
+// where older WebKit has no Response.json.
+export function completedSillyTavernResponse(completion, prepared, usageMetadata) {
+  const message = completion.choices[0].message;
+  if (message.tool_calls?.length) throw protocolError("unexpected_restored_tool");
+  if (prepared.stream) return toSillyTavernStream(guardCompletionStream(completionStream(completion, true), () => {}, null, BODY_LIMIT), () => usageMetadata);
+  const parts = [];
+  if (message.reasoning_content) parts.push({ thought: true, text: message.reasoning_content });
+  if (message.content) parts.push({ text: message.content });
+  return new Response(JSON.stringify({ ...completion, responseContent: { role: "model", parts }, usageMetadata,
+    vertexAntiTruncation: completion.router_anti_truncation }), { headers: { "content-type": "application/json" } });
+}
+
 async function readJson(response) {
   const chunks = [];
   let size = 0;
@@ -138,12 +151,5 @@ export async function restoreSillyTavernResponse(upstream, prepared) {
   const completion = prepared.toolName ? restoreAntiTruncationCompletion(translated, prepared.toolName) : translated;
   const restored = inspectCompletion(completion);
   if (!restored.valid) throw protocolError(restored.reason);
-  const message = completion.choices[0].message;
-  if (message.tool_calls?.length) throw protocolError("unexpected_restored_tool");
-  if (prepared.stream) return toSillyTavernStream(guardCompletionStream(completionStream(completion, true), () => {}, null, BODY_LIMIT), () => raw.usageMetadata);
-  const parts = [];
-  if (message.reasoning_content) parts.push({ thought: true, text: message.reasoning_content });
-  if (message.content) parts.push({ text: message.content });
-  return Response.json({ ...completion, responseContent: { role: "model", parts }, usageMetadata: raw.usageMetadata,
-    vertexAntiTruncation: completion.router_anti_truncation });
+  return completedSillyTavernResponse(completion, prepared, raw.usageMetadata);
 }

@@ -1,11 +1,15 @@
 import { PLUGIN_ID, PLUGIN_PATH, PLUGIN_VERSION, MODES, createFetchInterceptor, latestUserFloor } from "./shared.js";
 
+// TauriTavern has no Node server to host the plugin, so the extension shapes the
+// request and restores the reply itself. Rendering text as images needs the server.
+const tauri = window.__TAURITAVERN__ ? await import("../../src/tauritavern.mjs") : null;
+const direct = tauri && { prepare: tauri.prepareTauriTavernRequest, restore: tauri.restoreTauriTavernResponse };
 const context = SillyTavern.getContext();
 const events = context.eventTypes ?? context.event_types;
 const labels = { off: "关闭（普通 Vertex）", buffered: "非流式抗截断", streaming: "流式抗截断" };
 const reasons = { "existing-tools": "已有工具调用", "structured-output": "结构化输出", "multiple-candidates": "多个候选回复",
   "tool-history": "工具历史", "web-search": "联网搜索", "image-generation": "图片生成", "reverse-proxy": "反向代理",
-  model: "此模型不适用", "too-large": "请求超过 8 MiB" };
+  model: "此模型不适用", "too-large": "请求超过 8 MiB", "additional-parameters": "Vertex 附加参数不是 JSON 对象，无法合并" };
 const errors = { unicode_floor_required: "找不到真实用户楼层，已停止发送。请先输入消息，或关闭 Unicode 转码。",
   unicode_input_too_large: "转码后的请求超过大小限制，已停止发送。请缩短输入或关闭 Unicode 转码。",
   plugin_not_ready: "服务端插件未就绪或版本不匹配，本次请求已停止发送。请同时更新前后端插件并重启酒馆。",
@@ -103,10 +107,10 @@ function mount() {
     ["unicode", "Unicode（最新用户楼层及其副本）"],
     ["current-turn", "图片·当前轮（本轮用户文本）"],
     ["all", "图片·全部会话（用户与 AI 文本）"],
-  ]) input.add(new Option(text, value));
+  ]) if (!direct || !["current-turn", "all"].includes(value)) input.add(new Option(text, value));
   const saved = settings();
   input.value = saved.unicodeInput === true ? "unicode"
-    : ["current-turn", "all"].includes(saved.imageInput) ? saved.imageInput : "off";
+    : !direct && ["current-turn", "all"].includes(saved.imageInput) ? saved.imageInput : "off";
   input.addEventListener("change", () => {
     const current = settings();
     current.unicodeInput = input.value === "unicode";
@@ -114,20 +118,21 @@ function mount() {
     context.saveSettingsDebounced();
     showStatus();
   });
-  panel.append(label, select, inputLabel, input, status, check);
+  panel.append(label, select, inputLabel, input, status, direct ? Object.assign(document.createElement("small"),
+    { textContent: "TauriTavern：抗截断由本扩展直接完成，无需服务端插件；不支持图片输入。" }) : check);
   parent.append(panel);
   // Install once and chain any previously installed fetch wrapper.
   const key = Symbol.for("vertex-anti-truncation.fetch");
   if (!window[key]) {
     window[key] = true;
     window.fetch = createFetchInterceptor(window.fetch.bind(window), { origin: location.origin, getMode: mode,
-      getImageInput: () => settings().imageInput || "off",
+      getImageInput: () => direct ? "off" : settings().imageInput || "off",
       getUnicodeInput: () => settings().unicodeInput === true,
       getUserFloor: () => latestUserFloor(SillyTavern.getContext().chat),
       // Image input and Continue require a matching server plugin.
-      ensureBackend: async () => backendReady || checkBackend(true), onStatus: updateStatus });
+      ensureBackend: async () => Boolean(direct) || backendReady || checkBackend(true), onStatus: updateStatus, direct });
   }
-  void checkBackend(true);
+  if (!direct) void checkBackend(true);
 }
 
 context.eventSource.on(events.APP_READY ?? events.APP_INITIALIZED, mount);
