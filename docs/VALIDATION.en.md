@@ -2,6 +2,20 @@
 
 [中文](VALIDATION.md) | English
 
+## Docker gateway 0.8.0 (2026-10-16)
+
+All 206 offline tests passed on Windows and inside a Linux amd64 container. Compose checks cover initial setup, Host/Origin/CSRF and API authentication, published ports, service-name networking, non-root/read-only operation, CJK WebP rendering, persistence across recreation, health and graceful shutdown. The ARM64 image also receives a locally emulated Compose check; this is not an ARM hardware performance test.
+
+Live validation used an isolated amd64 container with a read-only mount of the user-authorized local service account, Gemini 3.7 Flash, global and Standard. Three sequential requests were capped at 512 output tokens each, with prompt retries disabled. Credentials were not copied into the repository or image; the file hash was unchanged and the test containers were removed.
+
+| Path | Result and evidence boundary |
+| --- | --- |
+| JSON reply | Client checks passed: nonempty content, restored=true, finish_reason=stop |
+| Native streaming | Client checks passed: 7 content events/reads, first content at about 50.88 seconds and a 414 ms content span, DONE received, restored=true and stop |
+| CJK text rendered as an image, non-stream reply | HTTP 200; the completed gateway event records one encoded page, restored=true, stop and complete nonempty content; about 3.80 seconds |
+
+For the third request, the temporary harness incorrectly expected the streaming fallback label `tool-transport-buffered-fields` instead of the correct non-stream label `tool-transport`. It failed before reading the body, so the exact `DOCKER_OK` reply was not checked; successful completion is supported by the existing gateway event. The routing code was inspected and the offline JSON image regression assertions were expanded and passed. No live request was repeated. This does not establish long-form quality, browser acceptance or compatibility with every reverse proxy.
+
 Local fixtures, live standalone requests and historical router checks cover different parts of the system.
 
 ## Update experience (2026-10-14, main source update)

@@ -1,6 +1,6 @@
 {
   "name": "vertex-streaming-anti-truncation",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "Experimental Vertex Gemini text-tool gateway with progressive native function-argument streaming.",
   "type": "module",
@@ -21,6 +21,7 @@
     "check": "node scripts/check.mjs",
     "test": "node --test test/*.test.mjs",
     "verify": "npm run check && npm test",
+    "test:docker": "node scripts/docker-smoke.mjs",
     "smoke": "node --env-file-if-exists=.env scripts/smoke.mjs",
     "package:sillytavern": "node scripts/package-sillytavern.mjs"
   },

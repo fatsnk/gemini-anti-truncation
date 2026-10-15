@@ -315,9 +315,14 @@ test("image input reaches compatible and native routes; failures do not call ups
   const rejected=await f.post({...payload,messages:[{role:'user',content:'😀'}]});assert.equal(rejected.status,400);assert.equal(f.requests.length,1);
  }
 });
-test("image input selects buffered compatibility for a streaming alias",async t=>{
+test("non-streaming image input keeps JSON tool transport for a streaming alias",async t=>{
  const f=await fixture(t,req=>Response.json(completion(req.json.tools[0].function.name)),{imageInput:'current-turn'});
- const response=await f.post({...payload,stream:false});assert.equal(response.status,200);assert.equal((await response.json()).choices[0].message.content,'OK');
+ const response=await f.post({...payload,stream:false});assert.equal(response.status,200);
+ assert.equal(response.headers.get('x-anti-truncation-transport'),'tool-transport');
+ assert.equal(response.headers.get('x-image-input'),'encoded');
+ const body=await response.json();assert.equal(body.choices[0].message.content,'OK');
+ assert.equal(body.choices[0].finish_reason,'stop');assert.equal(body.router_anti_truncation.restored,true);
+ assert.equal(f.events[0].responseIntegrity.outcome,'complete');assert.equal(f.events[0].imageInput.pages,1);
  assert.ok(f.requests[0].json.messages[0].content[0].image_url);
 });
 

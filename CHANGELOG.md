@@ -2,6 +2,12 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
+## Standalone gateway 0.8.0 — Docker deployment
+
+- Publish Node 24 Linux images on GHCR for amd64 and arm64, with `latest`, `0.8.0` and commit tags. The default Compose file pulls the image; `compose.build.yaml` enables a source build. Includes a persistent settings volume, non-root execution, a read-only root filesystem and a local liveness check.
+- Native installs keep their loopback default. Container listening and explicit console/API public URLs support mapped ports and HTTPS reverse proxies while retaining Host/Origin, session and CSRF checks.
+- Add bilingual deployment instructions and an isolated Compose smoke test for setup, authentication, persistence across recreation, service networking, CJK rendering and shutdown. No real inference is part of this test.
+
 ## Unreleased — update experience
 
 Available from `main` (2026-10-14); the version stays 0.4.0.

@@ -29,7 +29,7 @@ https://raw.githubusercontent.com/ken050210/vertex-streaming-anti-truncation/mai
 
 实验版，支持配置多个 Gemini 模型；默认保留 Gemini 3.7 Flash 的原有入口。模型与流式参数功能是否可用取决于上游。独立网关和 SillyTavern 服务端插件需要 Node.js 22.9+（TauriTavern 适配版不需要 Node.js），图片输入使用 @napi-rs/canvas 与随附的 Noto CJK 字体。
 
-已适配 **Gemini 4 Argon**（`gemini-4-argon`）：支持三种传输版本，处理思考等级、采样参数和预填充兼容；[添加方式、Express 快速 key、自定义上游的范围与长解码限制](docs/GEMINI4.md)。酒馆插件部分随 SillyTavern 集成 0.4.0（`sillytavern-v0.4.0`）发布；独立网关部分在 `main` 源码中，网关版本号仍为 0.7.0。
+已适配 **Gemini 4 Argon**（`gemini-4-argon`）：支持三种传输版本，处理思考等级、采样参数和预填充兼容；[添加方式、Express 快速 key、自定义上游的范围与长解码限制](docs/GEMINI4.md)。酒馆插件部分随 SillyTavern 集成 0.4.0（`sillytavern-v0.4.0`）发布；独立网关部分随网关 0.8.0 发布，支持源码和 Docker 部署。
 
 也提供 **SillyTavern 原生 Vertex 面板集成**：UI 扩展与服务端插件配套安装后，直接在 Google Vertex AI 连接面板选择关闭、非流式或流式抗截断，复用酒馆凭据，无需另开网关进程。默认关闭；[安装与验证说明](docs/SILLYTAVERN.md)。
 
@@ -90,6 +90,8 @@ SillyTavern / OpenAI-compatible client
 ```
 
 ## 启动
+
+Docker 用户可直接拉取 `ghcr.io/ken050210/vertex-streaming-anti-truncation:latest`。下载 Compose 文件后运行 `docker compose pull`、`docker compose up -d`，再用 `docker compose logs vertex-gateway` 获取首次设置链接。镜像包含控制台与 API，配置保存在数据卷中；详见 [Docker 部署](docs/DOCKER.md)（下载、端口、服务器、反代与容器内酒馆连接）。以下为直接使用 Node.js 的启动方法。
 
 支持完整 Vertex AI 服务账号、Express 快速模式 API Key，以及短期 OAuth access token。完整模式需要已启用 Vertex AI API 的项目和模型调用权限。实际推理按你的 Google Cloud 账户计费。
 
@@ -157,7 +159,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 npm run gateway
 ```
 
-服务只监听 `127.0.0.1`。`GET /healthz` 检查进程状态；其余接口都需要 `Authorization: Bearer <GATEWAY_API_KEY>`。服务账号私钥只在本机签署 JWT，JWT 发给 Google OAuth 换取短期 access token，再用于模型请求。
+直接运行时服务默认只监听 `127.0.0.1`；Docker 内监听 `0.0.0.0`，默认仅向宿主机本地发布端口。`GET /healthz` 检查进程状态；其余 API 接口都需要 `Authorization: Bearer <GATEWAY_API_KEY>`。服务账号私钥只在网关进程内签署 JWT，JWT 发给 Google OAuth 换取短期 access token，再用于模型请求。
 
 ### 通过代理访问 Google
 

@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 import { createConsole } from "../src/console-server.mjs";
+import { loadNetworkConfig } from "../src/network-config.mjs";
 
 try {
   const port = Number(process.env.GUI_PORT || 4780);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid GUI_PORT");
-  const app = await createConsole({ logger: event => process.stdout.write(JSON.stringify(event) + "\n") });
+  const network = loadNetworkConfig();
+  const app = await createConsole({ network, logger: event => process.stdout.write(JSON.stringify(event) + "\n") });
   await app.listen(port);
-  const url = `http://127.0.0.1:${port}/`;
+  const url = network.guiOrigin ? network.guiOrigin + "/" : `http://127.0.0.1:${port}/`;
   console.log(`Vertex Gateway console: ${url}`);
-  if (app.bootstrapToken) console.log(`First-time setup link (local access only): ${url}#setup=${app.bootstrapToken}`);
+  console.log(`Listening on ${network.listenHost}; console port ${port}`);
+  if (app.bootstrapToken) console.log(`First-time setup link (keep private): ${url}#setup=${app.bootstrapToken}`);
   if (app.status().error) console.error("Gateway not started: " + app.status().error);
   let stopping = false;
   for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, async () => {

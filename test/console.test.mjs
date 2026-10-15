@@ -9,6 +9,36 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createConsole } from "../src/console-server.mjs";
 import { upstreamDispatcher } from "../src/gateway.mjs";
 import { createSettingsStore } from "../src/settings-store.mjs";
+import { loadNetworkConfig } from "../src/network-config.mjs";
+
+test("container console supports an explicit HTTPS origin without weakening login or CSRF", async t => {
+  const network = loadNetworkConfig({ LISTEN_HOST: "0.0.0.0", GUI_ORIGIN: "https://console.example", GATEWAY_PUBLIC_URL: "https://api.example/v1" });
+  const f = await fixture(t, { network });
+  assert.equal(f.app.server.address().address, "0.0.0.0");
+  const request = (path, body, extra = {}) => new Promise((resolve, reject) => {
+    const req = http.request(f.base + path, { method: body === undefined ? "GET" : "POST",
+      headers: { host: "console.example", origin: "https://console.example", "content-type": "application/json", ...extra } }, res => {
+      const chunks = [];
+      res.on("data", chunk => chunks.push(chunk));
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: JSON.parse(Buffer.concat(chunks)) }));
+    });
+    req.on("error", reject); req.end(body === undefined ? undefined : JSON.stringify(body));
+  });
+  assert.equal((await request("/api/config")).status, 401);
+  assert.equal((await request("/api/login", { key: f.app.bootstrapToken }, { origin: "https://evil.example" })).status, 403);
+  const login = await request("/api/login", { key: f.app.bootstrapToken });
+  assert.equal(login.status, 200);
+  assert.match(login.headers["set-cookie"][0], /; Secure;/);
+  const cookie = login.headers["set-cookie"][0].split(";")[0];
+  const headers = { cookie, "x-csrf-token": login.body.csrf };
+  assert.equal((await request("/api/config", { revision: "new", settings: f.settings }, { cookie })).status, 403);
+  const saved = await request("/api/config", { revision: "new", settings: f.settings }, headers);
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.body.status.network, { listenHost: "0.0.0.0", gatewayPublicUrl: "https://api.example/v1" });
+  assert.equal((await fetch(`http://127.0.0.1:${f.settings.port}/healthz`)).status, 200);
+  assert.equal((await request("/api/logout", {}, headers)).status, 200);
+  assert.equal(f.requests.length, 0);
+});
 
 async function freePort(t, keep = false) {
   const s = http.createServer(); s.listen(0, "127.0.0.1"); await once(s, "listening");

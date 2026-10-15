@@ -6,7 +6,7 @@ Checked on 2026-10-14. The model ID is `gemini-4-argon`; Vertex's OpenAI-compati
 
 ## Updating
 
-The Tavern plugin part ships in SillyTavern integration 0.4.0 (`sillytavern-v0.4.0`); earlier packages do not include it. The gateway part is on `main`, and the gateway version stays 0.7.0.
+The Tavern plugin part ships in SillyTavern integration 0.4.0 (`sillytavern-v0.4.0`); earlier packages do not include it. The gateway part ships in gateway 0.8.0, available as source and Docker images.
 
 - Standalone gateway: stop it, run `git pull --ff-only` and `npm ci --ignore-scripts` in this checkout, then restart. Resolve any local conflicts without overwriting your configuration. Saved models, credentials, token limits and timeouts are preserved.
 - Git-installed Tavern integration: update both the UI extension and server plugin to the same `main` commit, run `npm ci --ignore-scripts` in the server plugin, restart Tavern and refresh the page. The [Tavern guide](SILLYTAVERN.md) covers locations and migration.

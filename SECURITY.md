@@ -2,7 +2,9 @@
 
 [中文](SECURITY.zh-CN.md) | English
 
-The gateway and console bind to `127.0.0.1`. Model and admin endpoints require a gateway key, and upstream URLs are fixed to Google Vertex AI. Keep the listener local and credentials outside this repository. Environment files, credentials and logs are excluded from releases. If you send Google traffic through a proxy with `NODE_USE_ENV_PROXY`, that proxy is inside the trust boundary.
+Native installs bind to `127.0.0.1` by default. Docker explicitly uses `LISTEN_HOST=0.0.0.0` inside the container; Compose publishes ports only on host loopback by default. Model and admin endpoints require a gateway key, and upstream URLs are fixed to Google Vertex AI. Keep credentials outside this repository. Environment files, credentials and logs are excluded from releases and the Docker build context. If you send Google traffic through a proxy with `NODE_USE_ENV_PROXY`, that proxy is inside the trust boundary.
+
+Remote console access requires an explicit `GUI_ORIGIN`; Host/Origin and CSRF checks remain enabled, and forwarded headers cannot authorize a host. HTTPS origins use Secure session cookies. Use HTTPS or an SSH tunnel for remote administration. The Docker data volume stores plaintext credentials; protect and back it up like the native settings directory. See [Docker deployment](docs/DOCKER.en.md).
 
 The console checks Host and Origin, denies cross-site requests, uses expiring HttpOnly/SameSite sessions and CSRF tokens, and limits failed sign-in attempts. On first launch the terminal displays a bootstrap link. The first save that sets a gateway key retires the link and signs out every other session opened with it. After that, changing the gateway key signs out other console sessions; other saves keep them. Configuration responses expose only credential-presence booleans. No keys enter browser storage. Test replies are shown only in the signed-in page and are not saved in logs.
 

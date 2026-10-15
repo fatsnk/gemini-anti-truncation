@@ -29,7 +29,7 @@ When you finish, tell me which files you changed, where the backups are, how to 
 
 Experimental release with configurable Gemini models. The existing Gemini 3.7 Flash alias remains the default. Model and function-argument streaming availability depend on Google. The gateway and the SillyTavern server plugin require Node.js 22.9+ (the TauriTavern adaptation needs no Node.js); optional text-to-image input uses @napi-rs/canvas plus the bundled OFL-licensed Noto CJK font.
 
-Gemini 4 Argon (`gemini-4-argon`) supports normal, buffered and native-streaming transport profiles. See [setup, Express keys, custom upstream boundaries and long-decode limits](docs/GEMINI4.en.md). The Tavern plugin part ships in SillyTavern integration 0.4.0 (`sillytavern-v0.4.0`); the gateway part is on `main` while the gateway version stays 0.7.0.
+Gemini 4 Argon (`gemini-4-argon`) supports normal, buffered and native-streaming transport profiles. See [setup, Express keys, custom upstream boundaries and long-decode limits](docs/GEMINI4.en.md). The Tavern plugin part ships in SillyTavern integration 0.4.0 (`sillytavern-v0.4.0`); the gateway part ships in gateway 0.8.0, available as source and Docker images.
 
 A paired SillyTavern UI extension and server plugin can also add the transport selector directly to the existing Google Vertex AI connection panel. It reuses Tavern credentials and runs inside the Tavern process. Disabled by default; see the [installation and validation guide (Chinese)](docs/SILLYTAVERN.md).
 
@@ -91,6 +91,8 @@ SillyTavern / OpenAI-compatible client
 
 ## Setup
 
+For Docker, pull `ghcr.io/ken050210/vertex-streaming-anti-truncation:latest`. Download the Compose file, run `docker compose pull` and `docker compose up -d`, then use `docker compose logs vertex-gateway` for the first-time setup link. The image includes the console and API, with settings in a persistent volume. See [Docker deployment](docs/DOCKER.en.md) for downloads, ports, remote servers, reverse proxies and Dockerized Tavern. The instructions below run directly on Node.js.
+
 Choose a full Vertex service-account JSON, an Express mode API key, or a short-lived OAuth access token. Full mode requires a Google Cloud project with the Vertex AI API enabled and permission to call the model. Inference is billed to your Google Cloud account.
 
 ```sh
@@ -149,7 +151,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 npm run gateway
 ```
 
-The service binds only to `127.0.0.1`. `GET /healthz` checks the process; every other endpoint requires `Authorization: Bearer <GATEWAY_API_KEY>`. The service-account private key signs a JWT locally. That JWT is sent to Google OAuth to obtain the short-lived access token used for model requests.
+Native installs bind to `127.0.0.1` by default. Docker listens on `0.0.0.0` inside the container and publishes ports only on host loopback by default. `GET /healthz` checks the process; every other API endpoint requires `Authorization: Bearer <GATEWAY_API_KEY>`. The service-account private key signs a JWT inside the gateway process. That JWT is sent to Google OAuth to obtain the short-lived access token used for model requests.
 
 ### Using a proxy for Google
 

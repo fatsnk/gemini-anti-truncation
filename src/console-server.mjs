@@ -6,6 +6,7 @@ import { buildConfig, buildConnectionConfig, publicSettings } from "./config.mjs
 import { createSettingsStore, mergeSettings, SettingsError } from "./settings-store.mjs";
 import { createGatewayServer, upstreamDispatcher } from "./gateway.mjs";
 import { discoverModels } from "./model-discovery.mjs";
+import { loadNetworkConfig, consoleRequestAccess } from "./network-config.mjs";
 
 const assets = new Map([["/", ["index.html", "text/html"]], ["/app.css", ["app.css", "text/css"]], ["/app.js", ["app.js", "text/javascript"]], ["/favicon.svg", ["favicon.svg", "image/svg+xml"]]]);
 const equal = (a, b) => typeof a === "string" && typeof b === "string" && a.length > 0 && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -17,8 +18,8 @@ async function readJson(req) {
   if (size > 2 * 1024 * 1024) throw new SettingsError("Configuration is too large", 413);
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new SettingsError("Invalid JSON"); }
 }
-async function listen(server, port) {
-  server.listen(port, "127.0.0.1");
+async function listen(server, port, host) {
+  server.listen(port, host);
   try { await once(server, "listening"); }
   catch { throw new SettingsError("Port is unavailable; the running service has not been changed", 409); }
 }
@@ -35,7 +36,7 @@ async function whileConnected(res, run) {
 }
 const AUTH_CREDENTIALS = [["service-account", "serviceAccountJson"], ["express", "apiKey"], ["access-token", "accessToken"]];
 
-export async function createConsole({ store = createSettingsStore(), fetchImpl = fetch, logger = () => {}, autoStart = true } = {}) {
+export async function createConsole({ store = createSettingsStore(), fetchImpl = fetch, logger = () => {}, autoStart = true, network = loadNetworkConfig() } = {}) {
   let saved = await store.load();
   let activeConfig, gateway, gatewayRef, runtimeError = saved.envError ? "Environment settings were ignored: " + saved.envError : null, busy = false;
   const retired = new Set(), events = [], sessions = new Map();
@@ -48,6 +49,7 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
   const activeRequests = () => (gateway?.gatewayStats().active || 0) + [...retired].reduce((n, s) => n + s.gatewayStats().active, 0);
   function status() {
     return { running: Boolean(gateway?.listening), activeRequests: activeRequests(), error: runtimeError,
+      network: { listenHost: network.listenHost, gatewayPublicUrl: network.gatewayPublicUrl },
       uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000), models: activeConfig?.models || [],
       modelAvailability: gateway?.modelAvailability() || [],
       active: activeConfig ? { port: activeConfig.port, projectId: activeConfig.projectId, location: activeConfig.location, authMode: activeConfig.authMode,
@@ -62,7 +64,7 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
     assertSeparatePorts(config);
     const ref = { current: config };
     const candidate = makeGateway(() => ref.current);
-    await listen(candidate, config.port);
+    await listen(candidate, config.port, network.listenHost);
     activeConfig = config; gateway = candidate; gatewayRef = ref; runtimeError = null;
   }
   async function stop() {
@@ -85,7 +87,7 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
     const ref = { current: config };
     if (!gateway?.listening || activeConfig.port !== config.port) {
       candidate = makeGateway(() => ref.current);
-      await listen(candidate, config.port);
+      await listen(candidate, config.port, network.listenHost);
     }
     try { saved = await store.save(next, body.revision); }
     catch (error) { candidate?.closeAllConnections(); await close(candidate); throw error; }
@@ -121,11 +123,11 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
     res.setHeader("content-security-policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     try {
       const port = server.address()?.port;
-      // Browsers leave the default HTTP port out of Host.
-      const hosts = ["127.0.0.1", "localhost"].flatMap(name => port === 80 ? [name, name + ":80"] : [name + ":" + port]);
-      if (!hosts.includes(req.headers.host)) throw new SettingsError("Invalid local host", 403);
-      const origin = req.headers.origin;
-      if ((origin && origin !== "http://" + req.headers.host) || req.headers["sec-fetch-site"] === "cross-site") throw new SettingsError("Cross-origin access denied", 403);
+      // Only an explicitly configured external origin is trusted. Forwarded headers
+      // cannot opt a request into access or change its cookie security policy.
+      const access = consoleRequestAccess(req.headers, port, network.guiOrigin);
+      if (!access.allowed) throw new SettingsError("Console host or origin is not allowed", 403);
+      const cookieFlags = `HttpOnly; SameSite=Strict; Path=/${access.secure ? "; Secure" : ""}`;
       const path = new URL(req.url, "http://localhost").pathname;
       if (req.method === "GET" && assets.has(path)) {
         const [file, type] = assets.get(path);
@@ -149,7 +151,7 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
         const id = randomBytes(32).toString("hex"), csrf = randomBytes(24).toString("hex");
         if (sessions.size >= 16) sessions.delete(sessions.keys().next().value);
         sessions.set(id, { csrf, expires: Date.now() + 8 * 3600000 });
-        res.setHeader("set-cookie", `vertex_console=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800`);
+        res.setHeader("set-cookie", `vertex_console=${id}; ${cookieFlags}; Max-Age=28800`);
         return json(res, 200, { csrf });
       }
       if (!session) throw new SettingsError("Please sign in", 401);
@@ -162,7 +164,7 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
       if (req.method !== "POST") throw new SettingsError("Not found", 404);
       if (!equal(req.headers["x-csrf-token"], session.csrf)) throw new SettingsError("Session verification failed", 403);
       if (path === "/api/logout") {
-        sessions.delete(sessionId); res.setHeader("set-cookie", "vertex_console=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
+        sessions.delete(sessionId); res.setHeader("set-cookie", `vertex_console=; ${cookieFlags}; Max-Age=0`);
         return json(res, 200, { ok: true });
       }
       const body = await readJson(req);
@@ -220,7 +222,7 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
   return {
     server, bootstrapToken, status,
     async listen(port = 4780) {
-      try { await listen(server, port); }
+      try { await listen(server, port, network.listenHost); }
       catch { throw new SettingsError(`Console port ${port} is unavailable (GUI_PORT); another console may already be running`, 409); }
       if (autoStart && saved.settings.gatewayKey) {
         try { await start(); } catch (error) { runtimeError = error.message; }

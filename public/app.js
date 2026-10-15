@@ -303,7 +303,10 @@ function renderStatus() {
   // Unsaved setups open on the connection page, so the startup or environment problem is shown there too.
   setError("config-warning", s.error ? errorMessage(s.error) : "");
   $("start-button").hidden = s.running || !ready; $("stop-button").hidden = !s.running; $("stop-button").disabled = s.activeRequests > 0; $("setup-button").hidden = ready;
-  $("endpoint").textContent = `http://127.0.0.1:${current?.port || c.port}/v1`;
+  $("endpoint").textContent = s.network?.gatewayPublicUrl || `http://127.0.0.1:${current?.port || c.port}/v1`;
+  const allInterfaces = s.network?.listenHost === "0.0.0.0";
+  $("listen-scope").textContent = allInterfaces ? "容器 / 网络访问" : "仅限本机 · 127.0.0.1";
+  $("port-help").textContent = allInterfaces ? "Docker 默认映射到容器 4781；修改此端口后需同步修改容器端口映射。" : "仅监听 127.0.0.1，与控制台端口分开。";
   $("overview-auth").textContent = current ? authNames[current.authMode] : "未启动";
   $("overview-project").textContent = (current || c).authMode === "express" ? "Express · 由 API Key 确定" : (current || c).projectId || "—";
   $("overview-location").textContent = (current || c).location;

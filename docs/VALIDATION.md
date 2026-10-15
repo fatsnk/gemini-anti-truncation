@@ -2,6 +2,20 @@
 
 中文 | [English](VALIDATION.en.md)
 
+## Docker 网关 0.8.0（2026-10-16）
+
+Windows 和 Linux amd64 容器内的 206 项离线测试通过。Compose 验收覆盖首次设置、Host/Origin/CSRF 与 API 鉴权、宿主机映射端口、容器服务名访问、非 root 和只读根文件系统、中文 WebP 渲染、重建后保留配置、健康检查及正常退出。ARM64 镜像另做本地模拟运行的 Compose 验收；它不是 ARM 实机性能测试。
+
+真实测试在独立 amd64 容器中以只读方式挂载用户授权的本地服务账号，使用 Gemini 3.7 Flash、global、Standard。串行发送 3 次请求，每次最多 512 输出 token，关闭提示词重试；凭据未写入仓库或镜像，文件哈希前后相同，测试容器已移除。
+
+| 路径 | 结果与证据边界 |
+| --- | --- |
+| 普通 JSON 回复 | 客户端验收通过；正文非空、restored=true、finish_reason=stop |
+| 原生流式 | 客户端验收通过；7 次正文事件与读取，首段约 50.88 秒、正文跨度 414 ms，收到 DONE，restored=true、stop |
+| 中文文字转图片后非流式回复 | HTTP 200；网关完成记录显示 encoded、1 页、restored=true、stop、正文存在且完整；约 3.80 秒 |
+
+第三条请求的临时验收脚本把非流式应有的 `tool-transport` 错误地要求为流式回退标记 `tool-transport-buffered-fields`，在读回正文前断言失败。因此这条真实回复没有逐字核对 `DOCKER_OK`；其成功依据是该次已经完成的请求记录。已离线核对传输选择代码、补充 JSON 图片路径断言并通过回归，没有重发真实请求。此结果不代表长篇写作、浏览器操作或任意反向代理环境均已验收。
+
 本页区分本地模拟测试、独立网关的真实上游测试，以及提取前的 router 验证。
 
 ## 更新体验（2026-10-14，main 源码更新）
