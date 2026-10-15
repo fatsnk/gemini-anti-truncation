@@ -14,7 +14,32 @@ Live validation used an isolated amd64 container with a read-only mount of the u
 | Native streaming | Client checks passed: 7 content events/reads, first content at about 50.88 seconds and a 414 ms content span, DONE received, restored=true and stop |
 | CJK text rendered as an image, non-stream reply | HTTP 200; the completed gateway event records one encoded page, restored=true, stop and complete nonempty content; about 3.80 seconds |
 
-For the third request, the temporary harness incorrectly expected the streaming fallback label `tool-transport-buffered-fields` instead of the correct non-stream label `tool-transport`. It failed before reading the body, so the exact `DOCKER_OK` reply was not checked; successful completion is supported by the existing gateway event. The routing code was inspected and the offline JSON image regression assertions were expanded and passed. No live request was repeated. This does not establish long-form quality, browser acceptance or compatibility with every reverse proxy.
+For the original third request, the temporary harness incorrectly expected the streaming fallback label `tool-transport-buffered-fields` instead of the correct non-stream label `tool-transport`. It failed before reading the body. The exact `DOCKER_OK` reply was not checked at that time, and no automatic retry was made; that request's successful completion was supported only by its gateway event.
+
+### Image reply body follow-up (2026-10-16)
+
+After separate user authorization, the corrected harness was saved as `scripts/docker-image-live.mjs`. It sends exactly one image request, captures the complete response body before assertions, then checks the non-stream transport, reply content and gateway event with the same request ID. Every failure stops without retrying. Five offline regression cases cover success, a wrong transport label, extra reply text, a mismatched event and an HTTP failure, including body retention on failure. The former temporary entry point now delegates to this single-request script.
+
+One live follow-up used the published `ghcr.io/ken050210/vertex-streaming-anti-truncation:0.8.0` image with the same local service account, Gemini 3.7 Flash, global, Standard, a 512-output-token cap and prompt retries disabled. The Chinese prompt was “请只回复英文标记 DOCKER_OK，不要解释。” (reply only with the English marker DOCKER_OK, without explanation).
+
+| Check | Observed result |
+| --- | --- |
+| Image input | `encoded`, `all` mode, one WebP page, 19,112 bytes |
+| Client response | HTTP 200, `tool-transport`, body content exactly `DOCKER_OK` |
+| Restoration and completion | `restored=true`, `finish_reason=stop`; `request_complete` event and `complete` integrity |
+| Correlation | `416c71b0-4b4f-483b-bc30-c8f3db68b0e1`; exactly one generation event in the isolated gateway, `promptRetried=false` |
+| Timing | Completed at 2026-10-15 23:35:18 UTC; 4,082 ms server latency, 4,108 ms client time including event checks |
+| Cleanup and credentials | Test container removed; credential mounted read-only with an unchanged file hash |
+
+The full body and event are retained locally in the ignored file `runtime/docker-image-live-result-2026-10-16.json`. Following this harness fix, `npm run verify` passed 115 release-file checks and 211 offline tests. This follow-up validates a short image request and its reply body on the published image; it does not establish long-form quality, browser acceptance or compatibility with every reverse proxy.
+
+To run this check yourself, first pull the image above and explicitly provide credentials. This sends one real request:
+
+```sh
+node scripts/docker-image-live.mjs --live --credentials /absolute/private/service-account.json
+```
+
+The receipt defaults to a unique file under `runtime/`. Use `--report <path>` to select another receipt path and `--image <reference>` to select an image already present locally. Normal `npm run verify` does not send live requests.
 
 Local fixtures, live standalone requests and historical router checks cover different parts of the system.
 

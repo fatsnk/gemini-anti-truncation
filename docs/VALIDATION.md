@@ -14,7 +14,32 @@ Windows 和 Linux amd64 容器内的 206 项离线测试通过。Compose 验收�
 | 原生流式 | 客户端验收通过；7 次正文事件与读取，首段约 50.88 秒、正文跨度 414 ms，收到 DONE，restored=true、stop |
 | 中文文字转图片后非流式回复 | HTTP 200；网关完成记录显示 encoded、1 页、restored=true、stop、正文存在且完整；约 3.80 秒 |
 
-第三条请求的临时验收脚本把非流式应有的 `tool-transport` 错误地要求为流式回退标记 `tool-transport-buffered-fields`，在读回正文前断言失败。因此这条真实回复没有逐字核对 `DOCKER_OK`；其成功依据是该次已经完成的请求记录。已离线核对传输选择代码、补充 JSON 图片路径断言并通过回归，没有重发真实请求。此结果不代表长篇写作、浏览器操作或任意反向代理环境均已验收。
+首次第三条请求的临时验收脚本把非流式应有的 `tool-transport` 错误地要求为流式回退标记 `tool-transport-buffered-fields`，在读回正文前断言失败。当时没有逐字核对 `DOCKER_OK`，也没有自动重试；该次的成功依据仅为已完成的请求记录。
+
+### 图片回复正文补验（2026-10-16）
+
+用户另行授权后，修正并保存为 `scripts/docker-image-live.mjs`：只发送一次图片请求，先保存完整响应正文，再核对非流式传输标记、回复内容和同一请求 ID 的网关事件；所有失败均停止，不重试。5 项离线回归覆盖正常回复、错误传输标记、多余正文、错误事件关联和 HTTP 失败，并验证失败时仍保存正文。旧临时入口也改为调用这个单请求脚本。
+
+对已发布的 `ghcr.io/ken050210/vertex-streaming-anti-truncation:0.8.0` 镜像执行一次真实补验，仍使用同一本地服务账号、Gemini 3.7 Flash、global、Standard、512 输出 token 上限及关闭提示词重试。中文提示为“请只回复英文标记 DOCKER_OK，不要解释。”。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 图片输入 | `encoded`，`all` 模式，1 页 WebP，19,112 字节 |
+| 客户端回复 | HTTP 200，`tool-transport`，正文恰好为 `DOCKER_OK` |
+| 还原与完成状态 | `restored=true`、`finish_reason=stop`；事件为 `request_complete`，完整性为 `complete` |
+| 请求关联 | `416c71b0-4b4f-483b-bc30-c8f3db68b0e1`；独立网关仅记录 1 次生成，`promptRetried=false` |
+| 时间 | 2026-10-15 23:35:18 UTC 完成；服务端 4,082 ms，客户端含事件核对 4,108 ms |
+| 清理与凭据 | 测试容器已移除，凭据只读挂载且文件哈希前后相同 |
+
+完整正文与事件保存在本地忽略文件 `runtime/docker-image-live-result-2026-10-16.json`。本轮修正后的 `npm run verify` 通过 115 个发布文件检查和 211 项离线测试。补验确认了发布镜像的短图片请求和回复正文，不代表长篇写作、浏览器操作或任意反向代理环境均已验收。
+
+如需自行执行，会发送一次真实请求；先拉取上述镜像，再显式提供凭据：
+
+```sh
+node scripts/docker-image-live.mjs --live --credentials /absolute/private/service-account.json
+```
+
+默认回执写入 `runtime/` 下的独立文件；可用 `--report <path>` 指定回执，用 `--image <reference>` 指定已存在于本机的镜像。普通 `npm run verify` 不发送真实请求。
 
 本页区分本地模拟测试、独立网关的真实上游测试，以及提取前的 router 验证。
 
