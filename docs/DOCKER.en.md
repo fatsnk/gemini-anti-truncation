@@ -15,9 +15,9 @@ docker compose up -d
 docker compose logs vertex-gateway
 ```
 
-Open the first-time setup link in the logs, including `#setup=...`. The console defaults to `http://127.0.0.1:4780/`. Enter Google credentials, models and a random gateway key, then save. The API starts at `http://127.0.0.1:4781/v1`. Sign in with the saved gateway key on later visits. Keep bootstrap links private.
+Open the first-time setup link in the logs, including `#setup=...`. The console defaults to `http://127.0.0.1:4780/`. Enter Google credentials (or a [custom upstream](../README.en.md#custom-upstream)'s URL and API key), models and a random gateway key, then save. The API starts at `http://127.0.0.1:4781/v1`. Sign in with the saved gateway key on later visits. Keep bootstrap links private.
 
-No registry login, source checkout, host Node.js or `.env` is needed. You can also download the Compose file manually from the [release](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/gateway-v0.10.0). Compose does not automatically pass host Google credentials into the container. Startup, saving and health checks never invoke a model; the console's manual connection test uses your Google billing account.
+No registry login, source checkout, host Node.js or `.env` is needed. You can also download the Compose file manually from the [release](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/gateway-v0.10.0). Compose does not automatically pass host Google credentials into the container. Startup, saving and health checks never invoke a model; the console's manual connection test uses your Google billing account, or a custom upstream's own billing.
 
 The container listens on `0.0.0.0`; Compose publishes both ports only on the host's loopback address by default. Native `npm start` still defaults to `127.0.0.1`. See [Docker port publishing](https://docs.docker.com/engine/network/port-publishing/).
 
@@ -64,7 +64,7 @@ networks:
 
 Recreate the affected containers. Service-name URLs work inside the shared network; host/browser clients use published addresses. See [Compose networking](https://docs.docker.com/compose/how-tos/networking/).
 
-Container localhost refers to that container. To use an outgoing host proxy, explicitly pass `NODE_USE_ENV_PROXY=1`, a reachable `HTTPS_PROXY`, and `NO_PROXY=127.0.0.1,localhost` in Compose's environment. Docker Desktop provides `host.docker.internal`; Linux Engine can add it with `extra_hosts: ["host.docker.internal:host-gateway"]`. The host proxy must also listen on a reachable interface. Verify this outgoing proxy path separately in your environment.
+Container localhost refers to that container. So a custom upstream running on the host cannot be reached at `127.0.0.1` or `localhost`; use `host.docker.internal` (mapping below), or the service name of a relay container on a shared network. When a proxy is also in use, add `host.docker.internal` to `NO_PROXY`. To send upstream traffic through an outgoing host proxy, explicitly pass `NODE_USE_ENV_PROXY=1`, a reachable `HTTPS_PROXY`, and `NO_PROXY=127.0.0.1,localhost` in Compose's environment. Docker Desktop provides `host.docker.internal`; Linux Engine can add it with `extra_hosts: ["host.docker.internal:host-gateway"]`. The host proxy must also listen on a reachable interface. Verify this outgoing proxy path separately in your environment.
 
 ## Data and credentials
 
@@ -99,7 +99,7 @@ docker compose up -d
 docker compose ps
 ```
 
-Include `--env-file .env.docker` when using that file. Container `healthy` means the console responds, including before initial setup; it does not validate Google credentials or inference. After saving, `/healthz` checks the gateway and authenticated `/v1/models` lists its configured models.
+Include `--env-file .env.docker` when using that file. Container `healthy` means the console responds, including before initial setup; it does not validate upstream credentials or inference. After saving, `/healthz` checks the gateway and authenticated `/v1/models` lists its configured models.
 
 To build from source:
 

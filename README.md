@@ -206,7 +206,7 @@ $env:NODE_USE_ENV_PROXY = "1"; $env:HTTPS_PROXY = "http://127.0.0.1:7890"; $env:
 NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://127.0.0.1:7890 NO_PROXY=127.0.0.1,localhost npm start
 ```
 
-把 `http://127.0.0.1:7890` 换成你的代理地址。代理模式下 `UPSTREAM_TIMEOUT_MS` 同样生效；连不上 Google 时日志记录 `502 upstream_unreachable`。代理路径目前只有本地测试，尚无真实请求验证。
+把 `http://127.0.0.1:7890` 换成你的代理地址。代理模式下 `UPSTREAM_TIMEOUT_MS` 同样生效；连不上上游时日志记录 `502 upstream_unreachable`。这些设置对[自定义上游](#自定义上游)同样生效；中转服务在局域网里时，要把它的地址加进 `NO_PROXY`，否则请求会绕到代理上。代理路径目前只有本地测试，尚无真实请求验证。
 
 ## 接入 SillyTavern
 
@@ -263,6 +263,8 @@ Google 的 [Gemini 3.7 Flash](https://docs.cloud.google.com/gemini-enterprise-ag
 
 流式抗截断版本的纯文本流式请求优先使用原生函数参数分段。Standard 服务账号/OAuth 模式的非流式请求使用 Vertex OpenAI 兼容接口；无法翻译的扩展字段、媒体或额外消息元数据保留原参数并回退到兼容接口，此时可能仍需等待全文。响应头 `x-anti-truncation-transport` 会显示 `tool-transport-buffered-fields`。
 
+接[自定义上游](#自定义上游)时，所有请求都走它的 OpenAI 兼容接口，本节关于原生接口、Express、Flex 和服务等级的说法都不适用；流式抗截断的响应头同样显示 `tool-transport-buffered-fields`。
+
 Express 和 Flex 的普通/流式请求均走原生接口。完整模式（服务账号或访问令牌）下的 Priority 与 Standard 一样走 OpenAI 兼容接口，只有“流式”模式的逐步输出仍走原生流式；Express 下的 Priority 仍走原生接口。以下原生接口限制只适用于走原生接口的请求。支持文本、内嵌 base64 图片、函数工具与工具历史、JSON/Schema、候选数量及常用采样/思考参数。不支持远程图片 URL、旧式 `functions`、`parallel_tool_calls`、logprobs 或未知扩展字段，遇到无法保留的参数返回 `400 unsupported_native_fields`，不会静默丢弃或改走 Standard。客户端工具与抗截断的合成工具一起声明（见下文）；结构化输出仍会跳过抗截断包装，原生接口继续正常翻译请求。
 
 只有请求中所有图片都要求同一级别时，图片的 OpenAI `detail` 才转成 Gemini 整个请求共用的媒体分辨率：`low`/`high` 对应 `MEDIA_RESOLUTION_LOW`/`MEDIA_RESOLUTION_HIGH`。只要有图片是 `auto` 或没写 detail（包括文字转图片生成的页面），或各图片级别不同，就保持默认。`extra_body.google.media_resolution` 优先；只有所有图片一致要求另一个级别时才返回 400。system/developer 消息里的图片返回 400（systemInstruction 只收文字）。只有开头连续的 system/developer 消息进入 systemInstruction；聊天记录之后的（如 Post-History、深度注入）按原位置作为 user 文本发送，与 SillyTavern 自带的 Google 连接一致。
@@ -271,7 +273,7 @@ Express 和 Flex 的普通/流式请求均走原生接口。完整模式（服�
 
 仍跳过包装（`x-anti-truncation-transport` 写明原因）并继续遵循客户端流式开关的请求：`tool_choice` 为 `required` 或指定某个函数（`tool-choice`，客户端要的是工具调用而不是正文）、旧版 `functions`/`function_call`（`existing-tools`/`tool-choice`）、旧版 `role: function` 历史（`tool-history`）、JSON/Schema 输出或多候选。真实工具、usage、思考元数据，以及 `length` / `content_filter` 等结束原因会保留。流中断会报错；网关不自动续写或重试已经开始输出的回复。
 
-原生路线（streaming 模式的原生传输，以及所有 Express 或 Flex 请求）和 buffered 模式转成的 SSE 回复，只有请求设置 `stream_options.include_usage: true` 时网关才发送 choices 为空的用量片段。来自 Vertex OpenAI 兼容接口的流（normal 模式，以及完整模式 Standard／Priority 下回退到该接口的 streaming 模式请求）会把客户端的 `stream_options` 原样交给 Vertex，用量片段按 Vertex 实际返回转发。`router_anti_truncation` 随结束片段发送。
+原生路线（streaming 模式的原生传输，以及所有 Express 或 Flex 请求）和 buffered 模式转成的 SSE 回复，只有请求设置 `stream_options.include_usage: true` 时网关才发送 choices 为空的用量片段。来自 Vertex OpenAI 兼容接口的流（normal 模式，以及完整模式 Standard／Priority 下回退到该接口的 streaming 模式请求），网关总会向 Vertex 要用量（附带 `stream_options.include_usage`），用于请求日志的[费用估算](#用量与费用估算)；客户端自己设置了 `include_usage` 时照常转发用量片段，没设置时不转发单独的用量片段。自定义上游的流把客户端的 `stream_options` 原样交给上游，用量片段按上游实际返回转发。`router_anti_truncation` 随结束片段发送。
 
 “抗截断”指通过工具参数传输并恢复已收到的文本。它不能恢复模型未生成或网络未收到的内容，也不能保证消除截断或绕过模型限制。
 
@@ -305,7 +307,7 @@ JSON 日志记录请求 ID、状态、耗时和 `antiTruncation` 元数据，不
 
 这是估算，以 Google Cloud 账单为准。Google 调价后需要更新 `src/pricing.mjs` 里的价目表。
 
-`/v1/chat/completions` 失败时返回 `{"error": {"code", "message", "type", "requestId", …}}`。常见错误码：`credential_error`（502，换取访问令牌失败，或密钥／令牌含中文引号等无法放进请求头的字符）、`upstream_unreachable`（502，连不上 Google：网络、DNS、TLS 或代理）、`upstream_http_error`（沿用 Google 的 HTTP 状态和 `Retry-After`）、`upstream_timeout`（504）、`request_too_large`（413，请求体超过 8 MiB；一直没传完的上传会在超时后以 504 结束）、`image_render_failed`（503，本地图片渲染失败）、`upstream_protocol_error`（502，上游回复格式异常或中途断开）。上游 HTTP 错误和输出开始前的上游错误事件（`upstream_stream_error`、`native_stream_error`）还会附带 `upstreamError`：Google 的 `status`、ErrorInfo `reason`，以及去除标记、邮箱、密钥类字符串、长令牌和本次凭据后的 `message`（最多 240 字符）。日志只记录 `status` 和 `reason`。
+`/v1/chat/completions` 失败时返回 `{"error": {"code", "message", "type", "requestId", …}}`。常见错误码：`credential_error`（502，换取访问令牌失败，或密钥／令牌含中文引号等无法放进请求头的字符）、`upstream_unreachable`（502，连不上上游：网络、DNS、TLS 或代理；接自定义上游时也可能是地址写错）、`upstream_http_error`（沿用上游的 HTTP 状态和 `Retry-After`）、`upstream_timeout`（504）、`request_too_large`（413，请求体超过 8 MiB；一直没传完的上传会在超时后以 504 结束）、`image_render_failed`（503，本地图片渲染失败）、`upstream_protocol_error`（502，上游回复格式异常或中途断开）。上游 HTTP 错误和输出开始前的上游错误事件（`upstream_stream_error`、`native_stream_error`）还会附带 `upstreamError`：上游错误里的 `status`、ErrorInfo `reason`（只有 Google 格式的错误带有），以及去除标记、邮箱、密钥类字符串、长令牌和本次凭据后的 `message`（最多 240 字符）。日志只记录 `status` 和 `reason`。
 
 一次正常结束的抗截断流式请求，应同时满足请求成功和以下状态：
 
@@ -328,7 +330,7 @@ npm run verify
 npm run smoke -- --live
 ```
 
-烟测默认使用已保存的 GUI 配置，没有保存配置时使用环境变量；仅命令行服务可加 `--env` 强制使用 `.env`。默认测试第一个流式抗截断版本，也可加 `--model 你的模型名称` 指定；正常和非流式版本可在 GUI 测试页验证。图片输入开启时烟测会在发送前停止，因为图片请求走兼容缓冲回退，无法验证流式渐进输出；请先关闭图片输入。
+烟测检查的是 Vertex 原生参数流，只适用于 Vertex 连接；接自定义上游时会直接停下并说明原因，请改用控制台的连接测试。烟测默认使用已保存的 GUI 配置，没有保存配置时使用环境变量；仅命令行服务可加 `--env` 强制使用 `.env`。默认测试第一个流式抗截断版本，也可加 `--model 你的模型名称` 指定；正常和非流式版本可在 GUI 测试页验证。图片输入开启时烟测会在发送前停止，因为图片请求走兼容缓冲回退，无法验证流式渐进输出；请先关闭图片输入。
 
 默认测试使用本地模拟数据，不需要真实凭据，也不产生推理费用。烟测会统计正文到达次数和时间跨度，并用响应请求 ID 核对日志。验证范围见 [docs/VALIDATION.md](docs/VALIDATION.md)。
 

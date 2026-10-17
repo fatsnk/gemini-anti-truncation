@@ -7,6 +7,8 @@ const loaded = process.argv.includes("--env") ? null : await createSettingsStore
 // With no saved settings, load() falls back to defaults when the environment is invalid; report the cause.
 if (loaded?.envError) throw new Error(loaded.envError);
 const settings = loaded ? loaded.settings : await settingsFromEnv();
+// The checks below need Vertex's native argument stream, which a custom upstream does not have.
+if (settings.authMode === "custom") throw new Error("The live smoke test checks Vertex's native argument stream, which a custom upstream does not have; use the console's connection test instead");
 // Image input forces the buffered fallback, so the native streaming check below could never pass.
 if (settings.imageInput !== "off") throw new Error("Image input forces tool-transport-buffered-fields; set it to off before running the streaming smoke test");
 const requested = process.argv.includes("--model") ? process.argv[process.argv.indexOf("--model") + 1] : null;

@@ -187,7 +187,7 @@ function showLogin(expired) {
 }
 function loginCopy(setup) {
   $("login-title").textContent = setup ? "首次设置" : "进入本地控制台";
-  $("login-description").textContent = setup ? "请打开启动终端中的首次设置链接，或输入链接中的设置密钥。" : "输入网关密钥，管理你的 Vertex 连接。";
+  $("login-description").textContent = setup ? "请打开启动终端中的首次设置链接，或输入链接中的设置密钥。" : "输入网关密钥，管理你的上游连接。";
 }
 const credentialFields = { "service-account": ["serviceAccountJson", "服务账号 JSON"], express: ["apiKey", "Express API Key"], "access-token": ["accessToken", "OAuth 令牌"], custom: ["customApiKey", "自定义上游 API Key"] };
 // Other modes' credentials stored in settings.json. Before the first save they come from the
@@ -251,7 +251,7 @@ function updateDraft(dirty = true) {
   $("credential-service").hidden = d.authMode !== "service-account";
   $("credential-express").hidden = d.authMode !== "express";
   $("credential-token").hidden = d.authMode !== "access-token";
-  $("vertex-fields").hidden = custom; $("credential-custom").hidden = !custom; $("tier-options").hidden = custom;
+  $("vertex-fields").hidden = custom; $("credential-custom").hidden = !custom; $("tier-options").hidden = custom; $("tier-help-card").hidden = custom;
   const others = otherCredentials(d.authMode);
   $("clear-other-row").hidden = !others.length;
   $("clear-other-label").textContent = "保存时删除其他鉴权方式已保存的凭据：" + others.map(([, label]) => label).join("、");
@@ -309,7 +309,7 @@ function renderStatus() {
   $("metric-traffic").textContent = "最近实际上游：" + (s.lastTrafficType || "尚无记录");
   $("runtime-badge").textContent = s.running ? "●  API ONLINE" : "●  " + label;
   $("runtime-badge").className = "badge " + (s.running ? "go" : "hold");
-  $("runtime-title").textContent = s.running ? "网关已就绪" : ready ? "网关已停止" : "连接你的 Vertex 项目";
+  $("runtime-title").textContent = s.running ? "网关已就绪" : ready ? "网关已停止" : "连接 Vertex 或自定义上游";
   $("runtime-description").textContent = s.error ? errorMessage(s.error) : s.running ? "本地接口正在监听。上游凭据与模型可用性以实际请求结果为准。" : ready ? "配置已保存，启动后即可接收客户端请求。" : "填写凭据并保存，即可向本地网关发送请求。";
   if (s.running && s.modelAvailability?.some(m => m.reason === "authentication_failed")) {
     $("runtime-description").textContent = "上游返回 401，当前凭据无法调用模型。请在连接配置修正凭据并保存应用；临时错误不会隐藏模型。";

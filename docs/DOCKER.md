@@ -15,9 +15,9 @@ docker compose up -d
 docker compose logs vertex-gateway
 ```
 
-打开日志中的首次设置链接（含 `#setup=...`），默认控制台为 `http://127.0.0.1:4780/`。按网页提示填写 Google 凭据、模型和随机网关密钥，保存后 API 在 `http://127.0.0.1:4781/v1` 启动。以后使用保存的网关密钥登录。首次设置链接属于管理凭据，不要分享日志。
+打开日志中的首次设置链接（含 `#setup=...`），默认控制台为 `http://127.0.0.1:4780/`。按网页提示填写 Google 凭据（或[自定义上游](../README.md#自定义上游)的地址和 API Key）、模型和随机网关密钥，保存后 API 在 `http://127.0.0.1:4781/v1` 启动。以后使用保存的网关密钥登录。首次设置链接属于管理凭据，不要分享日志。
 
-默认无需登录镜像仓库、克隆源码、安装宿主机 Node.js 或准备 `.env`。也可从 [Release](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/gateway-v0.10.0) 手动下载 Compose 文件。Compose 不会把宿主机的 Google 环境变量自动传入容器。启动、保存、健康检查均不会发送推理；网页中的连接测试需要手动触发，按 Google 账户计费。
+默认无需登录镜像仓库、克隆源码、安装宿主机 Node.js 或准备 `.env`。也可从 [Release](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/gateway-v0.10.0) 手动下载 Compose 文件。Compose 不会把宿主机的 Google 环境变量自动传入容器。启动、保存、健康检查均不会发送推理；网页中的连接测试需要手动触发，按 Google 账户计费；接自定义上游时按该服务的规则计费。
 
 容器内监听 `0.0.0.0`，Compose 默认只把两个端口发布到宿主机 `127.0.0.1`。[Docker 的端口发布说明](https://docs.docker.com/engine/network/port-publishing/)解释了两者的区别。原有 `npm start` 仍默认只监听本机。
 
@@ -81,7 +81,7 @@ networks:
 
 先执行 `docker network create tavern-gateway`，然后分别给酒馆服务和 `vertex-gateway` 服务添加 `networks: [shared]`，再重建对应容器。服务名解析仅在共享网络内有效；浏览器或宿主机客户端使用发布地址。详见 [Compose 网络说明](https://docs.docker.com/compose/how-tos/networking/)。
 
-容器内的 `127.0.0.1` 指向容器自身。若要让 Google 流量走宿主机代理，需在 Compose 的 `environment` 显式传入 `NODE_USE_ENV_PROXY=1`、可达的 `HTTPS_PROXY` 和 `NO_PROXY=127.0.0.1,localhost`。Docker Desktop 可使用 `host.docker.internal`；Linux Engine 可通过 `extra_hosts: ["host.docker.internal:host-gateway"]` 添加映射。宿主机代理也须监听容器可达的地址；这种代理路径需在你的环境单独验证。
+容器内的 `127.0.0.1` 指向容器自身。所以自定义上游如果跑在宿主机上，上游地址不能写 `127.0.0.1` 或 `localhost`，要写 `host.docker.internal`（映射方法见下文）；和网关在同一个共享网络里的中转容器，可以直接写它的服务名。同时使用代理时，把 `host.docker.internal` 也加进 `NO_PROXY`。若要让访问上游的流量走宿主机代理，需在 Compose 的 `environment` 显式传入 `NODE_USE_ENV_PROXY=1`、可达的 `HTTPS_PROXY` 和 `NO_PROXY=127.0.0.1,localhost`。Docker Desktop 可使用 `host.docker.internal`；Linux Engine 可通过 `extra_hosts: ["host.docker.internal:host-gateway"]` 添加映射。宿主机代理也须监听容器可达的地址；这种代理路径需在你的环境单独验证。
 
 ## 持久化与凭据
 
@@ -116,7 +116,7 @@ docker compose up -d
 docker compose ps
 ```
 
-如使用 `.env.docker`，为所有 Compose 命令补上 `--env-file .env.docker`。`healthy` 表示控制台进程可响应，首次未设置凭据时也可以健康；它不代表 Google 凭据或模型调用已经验证。网关启动后可检查 `/healthz`，并带网关密钥请求 `/v1/models`。
+如使用 `.env.docker`，为所有 Compose 命令补上 `--env-file .env.docker`。`healthy` 表示控制台进程可响应，首次未设置凭据时也可以健康；它不代表上游凭据或模型调用已经验证。网关启动后可检查 `/healthz`，并带网关密钥请求 `/v1/models`。
 
 如需从源码构建：
 
