@@ -11,7 +11,7 @@ const settings = loaded ? loaded.settings : await settingsFromEnv();
 if (settings.imageInput !== "off") throw new Error("Image input forces tool-transport-buffered-fields; set it to off before running the streaming smoke test");
 const requested = process.argv.includes("--model") ? process.argv[process.argv.indexOf("--model") + 1] : null;
 if (process.argv.includes("--model") && (!requested || requested.startsWith("--"))) throw new Error("--model requires a saved streaming alias");
-const models = modelProfiles(settings.models, settings.antiTruncation);
+const models = modelProfiles(settings.models, settings.antiTruncation, { custom: settings.authMode === "custom" });
 const model = requested ? models.find(m => m.id === requested) : models.find(m => m.mode === "streaming" && m.enabled !== false);
 if (!model || model.mode !== "streaming" || model.enabled === false) throw new Error("Select an enabled streaming anti-truncation profile with --model <alias>");
 const key = settings.gatewayKey;

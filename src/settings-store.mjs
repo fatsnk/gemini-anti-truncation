@@ -27,7 +27,7 @@ export function mergeSettings(current, patch, { connectionOnly = false } = {}) {
   }
   if (connectionOnly) buildConnectionConfig(next);
   else {
-    if (next.models != null) next.models = modelProfiles(next.models);
+    if (next.models != null) next.models = modelProfiles(next.models, true, { custom: next.authMode === "custom" });
     buildConfig(next);
   }
   return next;

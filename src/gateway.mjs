@@ -6,10 +6,11 @@ import http from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { prepareAntiTruncation, restoreAntiTruncationCompletion, wrapAntiTruncationStream, antiTruncationLogFields } from "./anti-truncation.mjs";
-import { buildNativeTextBody, buildNativeUrl, nativeRequestBody, supportsNativeRequest } from "./vertex-native.mjs";
+import { buildNativeTextBody, buildNativeUrl, nativeRequestBody, supportsNativeRequest, translateUsage } from "./vertex-native.mjs";
+import { estimateCostUsd, usageTokens } from "./pricing.mjs";
 import { wrapNativeTextStream } from "./vertex-text-stream.mjs";
 import { translateNativeCompletion, wrapNativeStream } from "./vertex-protocol.mjs";
-import { modelProfiles } from "./model-profiles.mjs";
+import { geminiModelKey, modelProfiles } from "./model-profiles.mjs";
 import { completionStream, aliasStream } from "./completion-stream.mjs";
 import { convertGeminiPrefill, fetchWithGeminiRecovery, compatibilityLogFields } from "./gemini-compat.mjs";
 import { prepareGemini4Request, validateGemini4Output } from "./gemini4.mjs";
@@ -129,7 +130,7 @@ export function upstreamDispatcher(timeoutMs) {
 }
 
 // fetchImpl exists for local protocol fixtures; HTTP clients cannot choose hosts,
-// credentials or the upstream model. The CLI always uses Google's fixed endpoint.
+// credentials or the upstream model. Only the saved configuration names the upstream.
 export function createGatewayServer(configSource, { fetchImpl = fetch, logger = () => {} } = {}) {
   const events = [];
   // Reapplying settings or restarting starts a fresh availability observation.
@@ -178,7 +179,11 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       route = models.find(model => model.id === payload.model);
       if (!route) throw new Problem(400, "unsupported_model");
       if (route.enabled === false) throw new Problem(503, "model_disabled");
-      payload = prepareGemini4Request(payload, route.upstreamModel);
+      const custom = config.authMode === "custom";
+      // A custom upstream gets its own model name verbatim. Gemini-specific handling follows the
+      // model that name refers to, and is skipped when none is recognizable.
+      const modelKey = custom ? geminiModelKey(route.upstreamModel) : route.upstreamModel;
+      payload = prepareGemini4Request(payload, modelKey);
       try {
         const prepared = prepareUnicodeInput(payload, config.unicodeInput === true, config.bodyLimitBytes);
         payload = prepared.payload; unicode = prepared.metadata;
@@ -188,7 +193,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       }
       response.setHeader("x-unicode-input", unicode?.reason || "disabled");
       const convertPrefill = () => {
-        const prefill = convertGeminiPrefill(payload, route.upstreamModel, config.geminiPrefillToUser !== false);
+        const prefill = convertGeminiPrefill(payload, modelKey, config.geminiPrefillToUser !== false);
         payload = prefill.payload; compatibility.prefillConverted = prefill.converted;
       };
       // All mode also rasterizes a trailing text prefill, so switch its role first.
@@ -209,14 +214,14 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       response.setHeader("x-gemini-prefill-converted", String(compatibility.prefillConverted));
       // Google documents these fields as unsupported for this model: drop them before
       // anti-truncation, native translation and the first submission.
-      const unsupported = documentedUnsupported(route.upstreamModel, payload);
+      const unsupported = documentedUnsupported(modelKey, payload);
       droppedParams = Object.keys(payload).filter(key => unsupported.has(key));
       payload = dropParams(payload, unsupported);
       if (droppedParams.length) response.setHeader("x-gemini-dropped-params", droppedParams.join(","));
-      const transport = prepareAntiTruncation(payload, route.mode !== "normal" && config.antiTruncation !== false, route.mode === "streaming");
+      const transport = prepareAntiTruncation(payload, route.mode !== "normal" && config.antiTruncation !== false, route.mode === "streaming", { native: !custom });
       const buffered = route.mode === "buffered" && Boolean(transport.toolName);
       const upstreamStream = stream && !buffered;
-      validateGemini4Output(payload, route.upstreamModel, upstreamStream);
+      validateGemini4Output(payload, modelKey, upstreamStream);
       if (buffered) transport.reason = "tool-transport-buffered";
       const native = transport.nativeStreaming || config.nativeOnly;
       if (config.nativeOnly && !supportsNativeRequest(payload)) throw new Problem(400, "unsupported_native_fields");
@@ -231,6 +236,8 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
         const body = transport.nativeStreaming ? buildNativeTextBody(value)
           : native ? nativeRequestBody(value) : { ...value, model: route.upstreamModel, stream: upstreamStream };
         if (!upstreamStream) delete body.stream_options;
+        // Vertex's compatible stream reports usage only on request; the log's cost estimate needs it.
+        else if (!native && !custom) body.stream_options = { ...body.stream_options, include_usage: true };
         return body;
       };
       // Preserve local field/schema rejection before authentication.
@@ -251,7 +258,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
         headers: { ...authentication, ...config.tierHeaders, "content-type": "application/json", accept: upstreamStream ? "text/event-stream" : "application/json" },
         body: JSON.stringify(value === upstreamPayload ? firstBody : requestBody(value)) }).catch(error => {
         throw error instanceof TypeError ? new Problem(502, error.cause ? "upstream_unreachable" : "credential_error") : error;
-      }), upstreamPayload, route.upstreamModel, {
+      }), upstreamPayload, modelKey, {
         settings: config.geminiPromptRetry, signal, bodyLimit: config.bodyLimitBytes,
         onRetry: () => { compatibility.promptRetried = true; },
       });
@@ -272,6 +279,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
         const completion = restoreAntiTruncationCompletion(await readCompletion(reply, config.bodyLimitBytes, native, route.id), transport.toolName);
         completion.model = route.id;
         audit.trafficType = trafficType(completion.usage);
+        audit.usage = completion.usage;
         if (transport.toolName) audit.restored = completion.router_anti_truncation.restored;
         audit.finishReason = completion.choices[0]?.finish_reason ?? null;
         return completion;
@@ -282,9 +290,9 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
         if (buffered) {
           upstream = completionStream(await readReply(upstream), includeUsage);
         } else {
-          if (transport.nativeStreaming) upstream = wrapNativeTextStream(upstream, transport.toolName, route.id, usage => { audit.trafficType = usage?.trafficType; }, includeUsage);
-          else if (native) upstream = wrapNativeStream(upstream, route.id, usage => { audit.trafficType = usage?.traffic_type; }, includeUsage);
-          upstream = aliasStream(upstream, route.id, metadata => Object.assign(audit, metadata));
+          if (transport.nativeStreaming) upstream = wrapNativeTextStream(upstream, transport.toolName, route.id, usage => { audit.trafficType = usage?.trafficType; audit.usage = translateUsage(usage); }, includeUsage);
+          else if (native) upstream = wrapNativeStream(upstream, route.id, usage => { audit.trafficType = usage?.traffic_type; audit.usage = usage; }, includeUsage);
+          upstream = aliasStream(upstream, route.id, metadata => Object.assign(audit, metadata), includeUsage);
           upstream = wrapAntiTruncationStream(upstream, transport.toolName, metadata => Object.assign(audit, metadata));
         }
         upstream = guardCompletionStream(upstream, metadata => { integrity = metadata; }, expectation, config.bodyLimitBytes);
@@ -336,12 +344,17 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       active--;
       response.off("close", onClose);
       request.off("aborted", onClose);
+      // A reply that reported usage was billed, even if it then failed a local check.
+      const tokens = usageTokens(audit?.usage);
+      const cost = tokens && config.authMode !== "custom" ? estimateCostUsd(route.upstreamModel, tokens,
+        { trafficType: audit.trafficType, serviceTier: config.serviceTier, location: config.location }) : null;
       const event = { at: new Date().toISOString(), event: code ? "request_failed" : "request_complete", requestId,
         model: route?.id || null, upstreamModel: route?.upstreamModel || null, mode: route?.mode || null, stream, status, latencyMs: Date.now() - started,
         serviceTier: config.serviceTier || "standard",
         trafficType: ["ON_DEMAND", "ON_DEMAND_FLEX", "ON_DEMAND_PRIORITY", "PROVISIONED_THROUGHPUT"].includes(audit?.trafficType) ? audit.trafficType : null,
         ...imageInputLogFields(image), ...unicodeInputLogFields(unicode), ...antiTruncationLogFields(audit), ...integrityLogFields(integrity), ...compatibilityLogFields(compatibility),
-        ...upstreamErrorLogFields(upstreamError), ...(droppedParams.length ? { droppedParams } : {}), ...(code ? { code } : {}) };
+        ...upstreamErrorLogFields(upstreamError), ...(droppedParams.length ? { droppedParams } : {}), ...(code ? { code } : {}),
+        ...(tokens ? { usage: tokens, estimatedCostUsd: cost } : {}) };
       events.push(event);
       if (events.length > 200) events.shift();
       logger(event);

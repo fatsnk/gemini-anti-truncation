@@ -34,7 +34,7 @@ async function whileConnected(res, run) {
   res.once("close", abort);
   try { return await run(client.signal); } finally { res.off("close", abort); }
 }
-const AUTH_CREDENTIALS = [["service-account", "serviceAccountJson"], ["express", "apiKey"], ["access-token", "accessToken"]];
+const AUTH_CREDENTIALS = [["service-account", "serviceAccountJson"], ["express", "apiKey"], ["access-token", "accessToken"], ["custom", "customApiKey"]];
 
 export async function createConsole({ store = createSettingsStore(), fetchImpl = fetch, logger = () => {}, autoStart = true, network = loadNetworkConfig() } = {}) {
   let saved = await store.load();
@@ -53,6 +53,7 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
       uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000), models: activeConfig?.models || [],
       modelAvailability: gateway?.modelAvailability() || [],
       active: activeConfig ? { port: activeConfig.port, projectId: activeConfig.projectId, location: activeConfig.location, authMode: activeConfig.authMode,
+        customBaseUrl: activeConfig.authMode === "custom" ? activeConfig.baseUrl : "",
         unicodeInput: activeConfig.unicodeInput, imageInput: activeConfig.imageInput, serviceTier: activeConfig.serviceTier, antiTruncation: activeConfig.antiTruncation,
         geminiPromptRetryEnabled: activeConfig.geminiPromptRetry.enabled } : null,
       requests: events.length, successes: events.filter(e => e.status >= 200 && e.status < 300).length,

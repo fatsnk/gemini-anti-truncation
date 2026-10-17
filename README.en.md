@@ -12,7 +12,7 @@ This repository can be used in three ways. Pick the one that matches your setup:
 | --- | --- | --- |
 | SillyTavern, with the transport selector on its Google Vertex AI panel | The anti-truncation plugin: a UI extension plus a server plugin | [SillyTavern guide (Chinese)](docs/SILLYTAVERN.md) |
 | TauriTavern | The adaptation of that plugin: the UI extension only | [TauriTavern section (Chinese)](docs/SILLYTAVERN.md#tauritavern) |
-| No Tavern Vertex connection, or another OpenAI-compatible client | The standalone gateway | [Setup](#setup) on this page |
+| No Tavern Vertex connection, or another OpenAI-compatible client; or an OpenAI-compatible relay that serves Gemini models | The standalone gateway | [Setup](#setup) on this page; relays under [Custom upstream](#custom-upstream) |
 
 On a phone, see [installing on a phone (Chinese)](docs/SILLYTAVERN.md#手机上怎么装): SillyTavern running in Termux gets the plugin through commands typed in Termux, while the TauriTavern app only needs the extension installed from inside the app.
 
@@ -93,7 +93,7 @@ SillyTavern / OpenAI-compatible client
 
 For Docker, pull `ghcr.io/ken050210/vertex-streaming-anti-truncation:latest`. Download the Compose file, run `docker compose pull` and `docker compose up -d`, then use `docker compose logs vertex-gateway` for the first-time setup link. The image includes the console and API, with settings in a persistent volume. See [Docker deployment](docs/DOCKER.en.md) for downloads, ports, remote servers, reverse proxies and Dockerized Tavern. The instructions below run directly on Node.js.
 
-Choose a full Vertex service-account JSON, an Express mode API key, or a short-lived OAuth access token. Full mode requires a Google Cloud project with the Vertex AI API enabled and permission to call the model. Inference is billed to your Google Cloud account.
+Choose a full Vertex service-account JSON, an Express mode API key, or a short-lived OAuth access token, or connect an OpenAI-compatible service that serves Gemini models instead (see [Custom upstream](#custom-upstream)). Full mode requires a Google Cloud project with the Vertex AI API enabled and permission to call the model. Inference is billed to your Google Cloud account.
 
 ```sh
 git clone https://github.com/ken050210/vertex-streaming-anti-truncation.git
@@ -104,9 +104,9 @@ npm start
 
 Open the console link printed in the terminal (default `http://127.0.0.1:4780/`). On first launch, use the setup link containing a local bootstrap key. On Windows you can also double-click `Start-GUI.cmd`. No `.env` is required for GUI setup.
 
-The console includes light/dark themes, responsive layout, overview, connection settings, metadata-only request logs and a bounded test page:
+The console includes light/dark themes, responsive layout, overview, connection settings, metadata-only request logs with token usage and [cost estimates](#usage-and-cost-estimates), and a bounded test page:
 
-- Enter the target project ID and paste/import the **complete service-account JSON**, or select **Express API Key** or **OAuth Token**. A service account's project can be filled automatically and overridden for cross-project access. Express uses a projectless global endpoint; its optional project field is only a note. Express API keys and access tokens must be visible ASCII: a pasted value with smart quotes or full-width characters is rejected when saved.
+- Enter the target project ID and paste/import the **complete service-account JSON**, or select **Express API Key**, **OAuth Token** or a [custom upstream](#custom-upstream). A service account's project can be filled automatically and overridden for cross-project access. Express uses a projectless global endpoint; its optional project field is only a note. Express API keys, access tokens and upstream API keys must be visible ASCII: a pasted value with smart quotes or full-width characters is rejected when saved.
 - Select **Standard, Flex or Priority**, an API port and timeout. Anti-truncation is chosen per model profile under **模型与版本**. Express and non-standard tiers require `global`.
 - Generate and copy a local gateway key (at least 16 visible ASCII characters, no spaces) before saving. Saved credentials are write-only; blank fields retain previous values. Use that key for client access and subsequent console sign-in. After the first save, if another authentication mode still has a stored credential, the connection page offers "delete other modes' saved credentials on save" (保存时删除其他鉴权方式已保存的凭据). Saving with it checked removes them from settings.json; changing the authentication mode clears the checkbox. Changing the gateway key signs out other console sessions; other saves keep them.
 - Save and apply without interrupting active replies. Port conflicts preserve the old listener and configuration. After an API port change, connections a client still holds on the old port receive `503 gateway_port_changed`; point the client at the new port. Starting, saving and validating do not call Google. The test page requires an explicit click and consent for each request, capped at 512 output tokens, with cancellation and streaming arrival statistics.
@@ -133,6 +133,35 @@ Save up to 100 profiles with unique public names, including Chinese aliases. Eac
 
 Discovery uses Google's paginated [publisher model catalog](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/rest/v1beta1/publishers.models/list) and filters Gemini IDs. Catalog presence does not establish project access, region, modality or tier support. The [Express API reference](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/express-mode/api-reference) does not guarantee listing support: if an API key cannot list models, use a service account for discovery or manually enter `gemini-…`, `google/gemini-…` or `publishers/google/models/gemini-…`. Errors preserve existing profiles and do not return a fabricated fallback catalog.
 
+### Custom upstream
+
+Besides Google's Vertex endpoints, the gateway can use an **OpenAI-compatible service that serves Gemini models**: a relay, a new-api / one-api style service, or Google AI Studio's OpenAI-compatible endpoint. Under **连接配置**, choose **自定义上游** (custom upstream) and fill in:
+
+- **Base URL**, up to the `/v1` level, for example `https://relay.example.com/v1`. Requests go to `<base>/chat/completions`; discovery reads `<base>/models`. A pasted `…/chat/completions` endpoint is accepted too. `http://` (local or LAN services) and `https://` both work; the URL cannot contain credentials, `?` or `#`.
+- **Upstream API key**, sent as `Authorization: Bearer <key>`. It must be visible ASCII and is write-only once saved.
+
+Add models under **模型与版本** as usual. Relays name models in different ways, such as `gemini-2.5-pro`, `google/gemini-2.5-pro` or `[满血]Gemini-2.5-Pro`, so with a custom upstream **the upstream model name is sent exactly as shown**; the gateway neither adds nor strips a prefix:
+
+- Discovery reads the upstream's model list and shows the names that contain `gemini` (any case), exactly as listed. Picking from it guarantees a name the upstream knows.
+- Manual entry accepts capitals, brackets, Chinese and prefixes; a name only has to be non-empty, free of control characters such as line breaks, and at most 200 characters. The client-facing name drops disallowed characters, so `[满血]Gemini-2.5-Pro` becomes `满血-Gemini-2.5-Pro`, which you can rename.
+- After a save, the console reads the upstream's model list again (listing only, no inference charge) and lists names that are missing from it, with a similar listed name when there is one, for example `google/gemini-3.7-flash`（列表里有：`gemini-3.7-flash`）. It warns without blocking, since some relays list only part of their models, and says so when the list cannot be read.
+- The gateway recognizes which Gemini model a name refers to (for example `gemini-4-argon` in `[满血]Gemini-4-Argon`) for model-specific handling such as Gemini 4 thinking levels and prefill conversion. This never changes the name that is sent; when no model is recognizable, that handling is skipped and the request goes out as usual.
+
+Switching from Vertex to a custom upstream keeps the existing `google/gemini-…` names, which are then sent as they are; if the relay does not know them, the post-save check says so and you can rename them. Switching back to Vertex requires replacing names that do not follow Vertex's format before saving.
+
+How it differs from Vertex:
+
+| Item | Custom upstream |
+| --- | --- |
+| Service tier, location, project ID | Not used; billing and model availability are up to the upstream |
+| Normal profiles | Forwarded as-is |
+| Buffered anti-truncation | Works if the upstream supports OpenAI tool calling and honors a forced `tool_choice` |
+| Streaming anti-truncation | Works over the compatible stream, not Vertex's native argument stream. Whether text appears progressively depends on whether the upstream forwards tool arguments in pieces; otherwise the text arrives at once when the upstream finishes. The request log shows the transport as `tool-transport-buffered-fields` |
+| Gemini-specific fields such as thinking levels | Sent as-is (for example `extra_body.google`); whether they take effect is up to the upstream |
+| [Cost estimates](#usage-and-cost-estimates) | None; the log records token counts when the upstream reports usage |
+
+Without tool-calling support upstream, anti-truncation cannot work: the upstream may reject the request, or ignore the tool and reply with plain text (the log shows the text as not restored). Use a normal profile in that case. The SillyTavern plugin (Vertex connection panel) does not use this setting.
+
 ### CLI-only setup
 
 Copy `.env.example` to `.env`: use `Copy-Item .env.example .env` in Windows PowerShell or `cp .env.example .env` on Linux/macOS. Set:
@@ -140,7 +169,7 @@ Copy `.env.example` to `.env`: use `Copy-Item .env.example .env` in Windows Powe
 - `GATEWAY_API_KEY`: a random local access key you generate, at least 16 visible ASCII characters with no spaces.
 - `VERTEX_PROJECT_ID`: your Google Cloud project ID. `VERTEX_LOCATION` defaults to `global`.
 - `GOOGLE_APPLICATION_CREDENTIALS`: this line is commented out in `.env.example`. For a service account, remove the leading `#` and set the path to a service-account JSON file outside the repository. On Windows, `C:/keys/service-account.json` works.
-- Alternatively keep that line commented and set `VERTEX_ACCESS_TOKEN`, or use `VERTEX_API_KEY` for Express mode (no project required). Choose exactly one authentication method; with none set, `npm run gateway` prints `Configure one Google authentication method: …` and exits.
+- Alternatively keep that line commented and set `VERTEX_ACCESS_TOKEN`, or use `VERTEX_API_KEY` for Express mode (no project required), or `CUSTOM_UPSTREAM_URL` and `CUSTOM_UPSTREAM_API_KEY` for a [custom upstream](#custom-upstream) (no project required). Choose exactly one; with none set, `npm run gateway` prints `Configure one upstream authentication method: …` and exits.
 - `VERTEX_SERVICE_TIER`: `standard` (default), `flex` or `priority`. Set `ANTI_TRUNCATION=false` to disable wrapping.
 - `PORT`: defaults to `4781`.
 
@@ -255,6 +284,20 @@ Non-streaming failures distinguish `invalid_choice` (a non-object candidate), `m
 ## Checking a request
 
 JSON logs contain request IDs, status, duration and `antiTruncation` metadata. They exclude prompts, reply text, tool arguments and credentials. `GET /admin/events` returns the most recent 200 records held in memory; restarting clears them. Redirect standard output to a file outside the repository if you need persistent logs.
+
+### Usage and cost estimates
+
+When the upstream reports usage, each record carries `usage` (`promptTokens`, `cachedTokens` as the cached part of the prompt, `outputTokens` including thinking) and `estimatedCostUsd`; the request log's 用量 / 估算费用 (usage / estimated cost) column shows the same numbers. To get usage, the gateway adds `stream_options.include_usage` to compatible-endpoint streams it requests from Vertex; when the client did not ask for usage, that chunk is not forwarded.
+
+Estimates use Google's list prices built into the gateway ([Vertex generative AI pricing](https://cloud.google.com/vertex-ai/generative-ai/pricing), checked 2026-10-17):
+
+- The price follows the request date: the Gemini 3.6/3.7/3.8 Flash promotion runs through 2026-12-31 and Gemini 4 Argon's through 2026-11-30, after which the regular price applies. Promotional prices are the net price after Google's 50% credit back.
+- The tier follows the `trafficType` the upstream reports: Priority costs 1.8 times Standard and Flex half; without a report, the selected tier applies. Provisioned Throughput is not estimated.
+- Gemini 3 and later cost 10% more outside `global`. When the input exceeds 200K tokens, 2.5 Pro and 3.1 Pro Preview bill the whole request at long-context rates.
+- Not estimated: custom upstreams (they set their own prices), models missing from the table (for example Gemini 3 Flash Preview, whose output price the official page does not list), and requests without reported usage (such as failures or cancellations mid-reply).
+- Only the tokens of the upstream reply that was delivered count; cache storage, grounding and other charges are excluded, and a rejected first submission before a prompt retry is not counted.
+
+These are estimates; your Google Cloud bill is authoritative. When Google changes prices, update the table in `src/pricing.mjs`.
 
 A failed `/v1/chat/completions` request returns `{"error": {"code", "message", "type", "requestId", …}}`. Common codes: `credential_error` (502: the token exchange failed, or the key or token contains characters, such as smart quotes, that cannot go in a request header), `upstream_unreachable` (502: Google could not be reached because of a network, DNS, TLS or proxy problem), `upstream_http_error` (keeps Google's HTTP status and `Retry-After`), `upstream_timeout` (504), `request_too_large` (413: the body exceeds 8 MiB; an upload that never finishes ends with 504 at the deadline), `image_render_failed` (503: local image rendering failed) and `upstream_protocol_error` (502: a malformed or interrupted upstream reply). Provider HTTP errors and provider error events before any output (`upstream_stream_error`, `native_stream_error`) also carry `upstreamError`: Google's `status`, its ErrorInfo `reason`, and a `message` with markup, email addresses, key-like strings, long tokens and the request's credential removed, capped at 240 characters. Logs record only `status` and `reason`.
 

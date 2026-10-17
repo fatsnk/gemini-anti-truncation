@@ -83,3 +83,5 @@ main {max-width:1510px;margin:0 auto;padding:30px 34px 20px}.page {display:grid;
 @media(max-width:1180px){.model-row {grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.model-actions {justify-content:flex-end}}
 @media(max-width:700px){.model-row {grid-template-columns:minmax(0,1fr)}.model-actions {justify-content:flex-start}}
 .check-row {display:flex;align-items:center;gap:10px;font-size:12px;font-weight:400;color:var(--ink-2);cursor:pointer}
+.auth-options {grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:700px){.auth-options {grid-template-columns:repeat(2,minmax(0,1fr))}}

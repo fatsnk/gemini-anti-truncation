@@ -1,8 +1,44 @@
-import { normalizeUpstreamModel } from "./model-profiles.mjs";
+import { customUpstreamModel, normalizeUpstreamModel } from "./model-profiles.mjs";
 import { waitWithSignal } from "./abort.mjs";
 
 class DiscoveryError extends Error {
   constructor(message, status = 502) { super(message); this.status = status; }
+}
+
+async function readCatalog(response) {
+  const chunks = []; let size = 0;
+  for await (const bytes of response.body ?? []) {
+    size += bytes.length;
+    if (size > 4 * 1024 * 1024) throw new DiscoveryError("Model catalog response is too large");
+    chunks.push(bytes);
+  }
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+  catch { throw new DiscoveryError("Invalid model catalog response"); }
+}
+
+// A custom upstream's OpenAI-compatible model list. Names stay exactly as the upstream lists them;
+// `models` keeps those that mention Gemini, `ids` every name for checking saved profiles.
+async function discoverCustomModels(config, fetchImpl, requestSignal) {
+  try {
+    const credential = await config.accessToken();
+    const response = await fetchImpl(config.baseUrl + "/models", { method: "GET", headers: { authorization: "Bearer " + credential }, signal: requestSignal, redirect: "error" });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new DiscoveryError(`Custom upstream model listing failed (HTTP ${response.status}); add a model ID manually`);
+    }
+    const data = await readCatalog(response);
+    if (!Array.isArray(data?.data)) throw new DiscoveryError("Invalid model catalog response");
+    const ids = new Set();
+    for (const item of data.data) {
+      try { ids.add(customUpstreamModel(item?.id)); } catch { /* Not a usable name. */ }
+    }
+    const sorted = [...ids].sort((a, b) => a.localeCompare(b));
+    return { models: sorted.filter(id => /gemini/i.test(id)).map(id => ({ id, upstreamModel: id, displayName: id })), ids: sorted,
+      source: "custom-upstream-models", fetchedAt: new Date().toISOString() };
+  } catch (error) {
+    if (error instanceof DiscoveryError) throw error;
+    throw new DiscoveryError(requestSignal.aborted ? "Model listing was cancelled or timed out" : "Unable to reach the custom upstream; check its URL and the connection");
+  }
 }
 
 // Publisher catalog only: listing metadata does not invoke any model, and does
@@ -10,6 +46,7 @@ class DiscoveryError extends Error {
 export async function discoverModels(config, { fetchImpl = fetch, signal } = {}) {
   const deadline = AbortSignal.timeout(20000);
   const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  if (config.authMode === "custom") return discoverCustomModels(config, fetchImpl, requestSignal);
   const host = config.location === "global" ? "aiplatform.googleapis.com" : `${config.location}-aiplatform.googleapis.com`;
   const base = `https://${host}/v1beta1/publishers/google/models`;
   let credential;
@@ -32,15 +69,7 @@ export async function discoverModels(config, { fetchImpl = fetch, signal } = {})
         const prefix = config.authMode === "express" ? "Express model listing is unavailable with this API key" : "Vertex model listing failed";
         throw new DiscoveryError(`${prefix} (HTTP ${response.status}); add a model ID manually or use service-account credentials`);
       }
-      const chunks = []; let size = 0;
-      for await (const bytes of response.body ?? []) {
-        size += bytes.length;
-        if (size > 4 * 1024 * 1024) throw new DiscoveryError("Model catalog response is too large");
-        chunks.push(bytes);
-      }
-      let data;
-      try { data = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
-      catch { throw new DiscoveryError("Invalid model catalog response"); }
+      const data = await readCatalog(response);
       if (!data || typeof data !== "object" || Array.isArray(data) || data.error ||
           (data.publisherModels != null && !Array.isArray(data.publisherModels))) throw new DiscoveryError("Invalid model catalog response");
       for (const item of data.publisherModels || []) {

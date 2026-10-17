@@ -313,6 +313,34 @@ test("Unicode save/apply persists and affects new requests independently of tran
   assert.equal(f.app.status().active.unicodeInput, false);
 });
 
+test("a custom upstream lists models, saves and applies through the console without echoing its key", async t => {
+  const listed = [];
+  const f = await fixture(t, { fetchImpl: async (url, init) => { listed.push([url, init.headers]); return Response.json({ data: [{ id: "google/gemini-fixture" }] }); } });
+  const custom = { ...f.settings, authMode: "custom", apiKey: "", customBaseUrl: "https://relay.example.invalid/v1/", customApiKey: "synthetic-relay-credential",
+    models: [{ id: "relay", upstreamModel: "[满血]Gemini-Fixture", mode: "normal" }] };
+  const discovered = await (await f.api("/api/models/discover", { settings: custom })).json();
+  assert.deepEqual(discovered.models.map(m => m.upstreamModel), ["google/gemini-fixture"]);
+  assert.deepEqual(listed, [["https://relay.example.invalid/v1/models", { authorization: "Bearer synthetic-relay-credential" }]]);
+  const response = await f.api("/api/config", { revision: "new", settings: custom });
+  assert.equal(response.status, 200);
+  const text = await response.text();
+  assert.equal(text.includes("synthetic-relay-credential"), false);
+  const result = JSON.parse(text);
+  assert.equal(result.settings.customApiKeySet, true);
+  assert.equal(result.settings.models[0].upstreamModel, "[满血]Gemini-Fixture");
+  assert.equal((await f.store.load()).settings.models[0].upstreamModel, "[满血]Gemini-Fixture");
+  // Vertex keeps its strict model IDs, so going back needs the name changed first.
+  const vertex = await f.api("/api/config", { revision: result.revision, settings: { authMode: "express", apiKey: "synthetic-express-credential" } });
+  assert.equal(vertex.status, 400);
+  assert.equal((await vertex.json()).error.message, "Invalid upstream Gemini model ID");
+  assert.equal(f.app.status().active.authMode, "custom");
+  assert.equal(f.app.status().active.customBaseUrl, "https://relay.example.invalid/v1");
+  assert.equal((await f.store.load()).settings.customApiKey, "synthetic-relay-credential");
+  const invalid = await f.api("/api/config", { revision: result.revision, settings: { customBaseUrl: "relay.example.invalid" } });
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).error.message, "Invalid CUSTOM_UPSTREAM_URL");
+});
+
 test("image input setting persists and conflicts are rejected before writeback",async t=>{
  const f=await fixture(t);
  const response=await f.api('/api/config',{revision:'new',settings:{...f.settings,imageInput:'current-turn'}});

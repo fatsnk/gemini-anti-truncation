@@ -24,7 +24,7 @@ export function antiTruncationLogFields(metadata) {
 // the randomly named synthetic tool. A forced tool choice (no text reply expected, e.g.
 // Tavern Helper's own transport), the legacy functions API, structured output and
 // multi-candidate requests bypass it.
-export function prepareAntiTruncation(payload, enabled, streamArguments = false, { continuation = false } = {}) {
+export function prepareAntiTruncation(payload, enabled, streamArguments = false, { continuation = false, native = true } = {}) {
     const skip = reason => ({ payload, toolName: null, reason });
     if (!enabled) return skip("disabled");
     if (payload.functions?.length) return skip("existing-tools");
@@ -35,8 +35,9 @@ export function prepareAntiTruncation(payload, enabled, streamArguments = false,
     if (payload.messages.some(message => message.role === "function" || message.function_call)) return skip("tool-history");
     const clientTools = Array.isArray(payload.tools) ? payload.tools : [];
     const requested = streamArguments && payload.stream === true;
-    // The native stream only carries the synthetic text call; client tools use the fallback.
-    const nativeStreaming = requested && !clientTools.length && supportsNativeTextStream(payload);
+    // The native stream only carries the synthetic text call; client tools, and upstreams
+    // without Vertex's native API, use the fallback.
+    const nativeStreaming = requested && native && !clientTools.length && supportsNativeTextStream(payload);
     const toolName = "router_emit_" + Array.from(crypto.getRandomValues(new Uint8Array(12)), byte => byte.toString(16).padStart(2, "0")).join("");
     // Callable client tools turn the forced synthetic call into "call some tool": the text
     // goes through the synthetic one, real calls pass through. "none" keeps them uncallable.

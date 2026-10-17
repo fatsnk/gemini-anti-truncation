@@ -2,6 +2,20 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
+## Unreleased — custom upstream and cost estimates for the standalone gateway
+
+Changes on `main`; the gateway version stays 0.9.1. Standalone gateway only; the SillyTavern plugin is unchanged (its server package gains an unused `src/pricing.mjs`).
+
+- The request log gains a usage / estimated cost column: each record carries `usage` (input, its cached part, output including thinking) and an `estimatedCostUsd` from Google's list prices built into the gateway. Prices were checked on 2026-10-17 against the Vertex generative AI pricing page. The estimate picks promotional or regular prices by request date, applies the tier the upstream reports (Priority ×1.8, Flex ×0.5), adds 10% for Gemini 3+ outside `global`, and uses long-context rates for 2.5 Pro and 3.1 Pro Preview above 200K input tokens. Custom upstreams, Provisioned Throughput and models missing from the table are not estimated.
+- To get usage for streamed replies, the gateway adds `stream_options.include_usage` to compatible-endpoint streams it requests from Vertex; when the client did not ask for usage, that chunk is not forwarded. Custom upstreams are not asked for it.
+
+- Connection settings gain a fourth option, **custom upstream** (自定义上游): the base URL (up to `/v1`) and API key of an OpenAI-compatible service that serves Gemini models. Requests go to `<base>/chat/completions` with `Authorization: Bearer`. Vertex project, location and service tier are not used. CLI mode uses `CUSTOM_UPSTREAM_URL` and `CUSTOM_UPSTREAM_API_KEY`.
+- With a custom upstream, upstream model names are sent exactly as saved, since relays name models in different ways. Names may use capitals, brackets, Chinese or prefixes (non-empty, no control characters, at most 200 characters). Discovery reads `<base>/models` and shows the names that contain `gemini`, exactly as listed. Gemini-specific handling such as Gemini 4 thinking levels follows the Gemini model a name refers to, and is skipped when none is recognizable. A profile list without explicit entries defaults to `gemini-3.7-flash` for a custom upstream.
+- After a save with a custom upstream, the console compares the saved names with the upstream's model list (listing only, no inference) and warns about missing names, suggesting a similar listed name when there is one. It does not block the save.
+- Normal profiles are forwarded as-is; both anti-truncation profiles use the synthetic-tool transport over the compatible API. Streaming anti-truncation has no Vertex native argument stream, is logged as `tool-transport-buffered-fields`, and arrives piece by piece only if the upstream forwards tool arguments in pieces.
+- The CLI's missing/duplicate authentication messages are now `Configure one upstream authentication method: …` / `Configure exactly one upstream authentication method: …` and list `CUSTOM_UPSTREAM_URL`. The console labels upstream error details "上游：" instead of "Google：".
+- Validation: 224 local tests pass, including new tests for configuration checks, gateway forwarding, discovery, console saving, price calculation and logged usage. Against a local mock OpenAI-compatible service, the console saved the settings, listed models, completed a streaming anti-truncation test and showed token usage in the request log. Its list mixed `gemini-3.7-flash`, `google/gemini-2.5-pro` and `[满血]Gemini-2.5-Pro`; the selected name reached the mock service unchanged, and the unlisted `google/gemini-3.7-flash` was flagged after saving. No real third-party relay was contacted and no real Vertex request was sent, so the estimates have not been compared with a real bill.
+
 ## Standalone gateway 0.9.1 and SillyTavern integration 0.5.1 — tool results on native routes
 
 Tags `gateway-v0.9.1` (Docker image `0.9.1`) and `sillytavern-v0.5.1` (one-step package) on the same commit. Replaces 0.9.0/0.5.0 for anyone using tools.

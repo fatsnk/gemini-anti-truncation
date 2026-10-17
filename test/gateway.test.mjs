@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import http from "node:http";
 import { createGatewayServer, upstreamDispatcher } from "../src/gateway.mjs";
-import { loadConfig, MODEL_ID, UPSTREAM_MODEL } from "../src/config.mjs";
+import { buildConfig, DEFAULT_SETTINGS, loadConfig, MODEL_ID, UPSTREAM_MODEL } from "../src/config.mjs";
 
 const key = "synthetic-local-key-for-tests";
 const token = "synthetic-oauth-token";
@@ -350,6 +350,62 @@ test("client tool calls pass through beside the restored text on compatible and 
     assert.equal(f.requests.at(-1).json.toolConfig?.functionCallingConfig?.streamFunctionCallArguments, undefined);
     assert.deepEqual(f.events.at(-1).antiTruncation, { transport: "tool-transport-buffered-fields", restored: true, finishReason: "tool_calls", streamDone: true });
   }
+});
+
+test("the log records token usage and a list-price estimate, asking a compatible stream for usage it then hides", async t => {
+  const usage = { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1500, prompt_tokens_details: { cached_tokens: 400 } };
+  const line = value => "data: " + JSON.stringify(value) + "\n\n";
+  const f = await fixture(t, request => {
+    if (!request.json.stream) return Response.json({ choices: [{ index: 0, message: { role: "assistant", content: "plain" }, finish_reason: "stop" }], usage });
+    return new Response(line({ choices: [{ index: 0, delta: { content: "plain" }, finish_reason: null }] }) + line({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }) +
+      line({ choices: [], usage: { ...usage, extra_properties: { google: { traffic_type: "ON_DEMAND_PRIORITY" } } } }) + "data: [DONE]\n\n");
+  }, { models: [{ id: "plain", upstreamModel: UPSTREAM_MODEL, mode: "normal" }] });
+  await (await f.post({ ...payload, model: "plain" })).json();
+  const expected = { promptTokens: 1000, cachedTokens: 400, outputTokens: 500 };
+  assert.deepEqual(f.events[0].usage, expected);
+  // Before 2027: 600 × $0.75 + 400 × $0.075 + 500 × $3.75 per 1M tokens; 2027 doubles it.
+  assert.ok([0.002355, 0.00471].includes(f.events[0].estimatedCostUsd));
+  const wire = await (await f.post({ ...payload, model: "plain", stream: true })).text();
+  assert.deepEqual(f.requests[1].json.stream_options, { include_usage: true });
+  assert.equal(records(wire).some(record => record.usage), false, "the client did not ask for usage");
+  assert.equal(visible(wire), "plain");
+  assert.deepEqual(f.events[1].usage, expected);
+  assert.equal(f.events[1].trafficType, "ON_DEMAND_PRIORITY");
+  assert.ok(Math.abs(f.events[1].estimatedCostUsd - f.events[0].estimatedCostUsd * 1.8) < 1e-8);
+  const asked = await (await f.post({ ...payload, model: "plain", stream: true, stream_options: { include_usage: true } })).text();
+  assert.equal(records(asked).filter(record => record.usage).length, 1);
+});
+
+test("a custom upstream gets compatible requests with its own key and model names sent exactly as saved", async t => {
+  // Relays name models their own way: a publisher prefix, capitals or a bracketed tag all go out unchanged.
+  const config = buildConfig({ ...DEFAULT_SETTINGS, gatewayKey: key, authMode: "custom", customBaseUrl: "https://relay.example.invalid/v1", customApiKey: "synthetic-relay-key",
+    models: [{ id: "relay-normal", upstreamModel: " google/gemini-3.7-flash ", mode: "normal" }, { id: "relay-stream", upstreamModel: "[满血]Gemini-4-Argon", mode: "streaming" }] });
+  const line = value => "data: " + JSON.stringify(value) + "\n\n";
+  const f = await fixture(t, request => {
+    assert.equal(request.url, "https://relay.example.invalid/v1/chat/completions");
+    assert.deepEqual(Object.keys(request.headers).sort(), ["accept", "authorization", "content-type"]);
+    assert.equal(request.headers.authorization, "Bearer synthetic-relay-key");
+    assert.equal(request.json.model, request.json.stream ? "[满血]Gemini-4-Argon" : "google/gemini-3.7-flash");
+    assert.equal(request.json.contents, undefined);
+    if (!request.json.stream) return Response.json({ choices: [{ index: 0, message: { role: "assistant", content: "plain" }, finish_reason: "stop" }] });
+    // The text arrives as tool-call argument pieces, the way a compatible stream sends them.
+    const name = request.json.tools.at(-1).function.name, args = JSON.stringify({ content: "streamed text" });
+    const pieces = [args.slice(0, 5), args.slice(5, 14), args.slice(14)].map((part, index) => line({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0,
+      ...(index ? {} : { id: "call_relay", type: "function" }), function: { ...(index ? {} : { name }), arguments: part } }] }, finish_reason: null }] }));
+    return new Response(pieces.join("") + line({ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] }) + "data: [DONE]\n\n",
+      { headers: { "content-type": "text/event-stream" } });
+  }, config);
+  const normal = await f.post({ ...payload, model: "relay-normal" });
+  assert.equal((await normal.json()).choices[0].message.content, "plain");
+  const streamed = await f.post({ ...payload, model: "relay-stream", stream: true, reasoning_effort: "high" });
+  assert.equal(streamed.headers.get("x-anti-truncation-transport"), "tool-transport-buffered-fields");
+  assert.equal(visible(await streamed.text()), "streamed text");
+  assert.equal(f.requests[1].json.stream, true);
+  // Google's prices do not apply to a custom upstream, and it is not asked for unrequested fields.
+  assert.equal(f.requests[1].json.stream_options, undefined);
+  // The name still refers to Gemini 4 Argon, so its thinking level is translated.
+  assert.equal(f.requests[1].json.extra_body.google.thinking_config.thinking_level, "HIGH");
+  assert.equal(f.events[1].antiTruncation.restored, true);
 });
 
 test("image input reaches compatible and native routes; failures do not call upstream", async t => {

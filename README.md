@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | 用 SillyTavern，想在 Google Vertex AI 连接面板里直接选抗截断 | 抗截断插件：UI 扩展和服务端插件两半 | [SillyTavern 说明](docs/SILLYTAVERN.md) |
 | 用 TauriTavern（TT 酒馆） | 抗截断插件的适配版：只装 UI 扩展 | [TauriTavern 说明](docs/SILLYTAVERN.md#tauritavern) |
-| 不用酒馆的 Vertex 连接，或给其他 OpenAI 兼容客户端用 | 独立网关 | 本页[启动](#启动) |
+| 不用酒馆的 Vertex 连接，或给其他 OpenAI 兼容客户端用；或者想接提供 Gemini 模型的 OpenAI 兼容中转 | 独立网关 | 本页[启动](#启动)；中转见[自定义上游](#自定义上游) |
 
 在手机上使用时，先看[手机上怎么装](docs/SILLYTAVERN.md#手机上怎么装)：Termux 里的 SillyTavern 在 Termux 中用命令安装插件，TauriTavern App 只需在应用里安装扩展。
 
@@ -93,7 +93,7 @@ SillyTavern / OpenAI-compatible client
 
 Docker 用户可直接拉取 `ghcr.io/ken050210/vertex-streaming-anti-truncation:latest`。下载 Compose 文件后运行 `docker compose pull`、`docker compose up -d`，再用 `docker compose logs vertex-gateway` 获取首次设置链接。镜像包含控制台与 API，配置保存在数据卷中；详见 [Docker 部署](docs/DOCKER.md)（下载、端口、服务器、反代与容器内酒馆连接）。以下为直接使用 Node.js 的启动方法。
 
-支持完整 Vertex AI 服务账号、Express 快速模式 API Key，以及短期 OAuth access token。完整模式需要已启用 Vertex AI API 的项目和模型调用权限。实际推理按你的 Google Cloud 账户计费。
+支持完整 Vertex AI 服务账号、Express 快速模式 API Key，以及短期 OAuth access token；也可以改接提供 Gemini 模型的 OpenAI 兼容服务，见[自定义上游](#自定义上游)。完整模式需要已启用 Vertex AI API 的项目和模型调用权限。实际推理按你的 Google Cloud 账户计费。
 
 ```sh
 git clone https://github.com/ken050210/vertex-streaming-anti-truncation.git
@@ -106,11 +106,11 @@ npm start
 
 控制台支持深浅主题和窄屏布局：
 
-- **连接配置**：填写项目 ID，粘贴或导入完整服务账号 JSON；也可切换到 Express API Key 或短期 OAuth Token。服务账号 JSON 中的项目 ID 可自动填入，也可覆盖为另一个有权限访问的目标项目。Express API Key 和访问令牌只能含可见 ASCII 字符，混入中文引号、全角字符时保存会被拒绝。
+- **连接配置**：填写项目 ID，粘贴或导入完整服务账号 JSON；也可切换到 Express API Key、短期 OAuth Token 或[自定义上游](#自定义上游)。服务账号 JSON 中的项目 ID 可自动填入，也可覆盖为另一个有权限访问的目标项目。Express API Key、访问令牌和上游 API Key 只能含可见 ASCII 字符，混入中文引号、全角字符时保存会被拒绝。
 - **服务等级**：显式选择 Standard、Flex 或 Priority。Express、Flex 和 Priority 使用 `global`。Express 的项目 ID 可选填，仅作备注，其请求端点不包含项目和地区。
 - **本地网关**：设置 API 端口、超时和随机网关密钥（至少 16 个可见 ASCII 字符，不含空格）。复制生成的网关密钥后再保存，后续凭据不回显；空白凭据字段保留已有值。保存过配置后，若其他鉴权方式仍有已保存的凭据，连接配置会出现“保存时删除其他鉴权方式已保存的凭据”勾选项；勾选后保存即从 settings.json 删除这些凭据，切换鉴权方式会自动取消勾选。更换网关密钥会让其他已登录的控制台会话退出，其他保存不影响登录。
 - **模型与版本**：拉取并搜索 Google 模型目录，批量添加所需版本；也可手动填写上游 ID。分别编辑客户端名称、上游模型与传输模式，最多保存 100 个版本。
-- **总览与日志**：启动/停止网关，复制客户端 URL，检查请求状态、正文还原、结束原因以及请求档位/实际上游档位。记录仅保留最近 200 条。
+- **总览与日志**：启动/停止网关，复制客户端 URL，检查请求状态、正文还原、结束原因、请求档位/实际上游档位，以及 token 用量和[估算费用](#用量与费用估算)。记录仅保留最近 200 条。
 - **连接测试**：选择已保存的模型版本，勾选后手动发送一次最多 512 token 的测试，支持流式和普通响应、取消，以及流式正文到达统计。保存、校验、启动与拉取目录均不触发推理。
 
 配置保存到用户目录的 `~/.vertex-streaming-anti-truncation/settings.json`，可通过 `GATEWAY_STATE_DIR` 指定其他目录。凭据保存在本机明文文件中，请使用私人目录并限制文件访问。配置不会写进仓库或浏览器存储。保存采用版本检查和原子替换；端口冲突不会替换正在使用的配置；更换 API 端口后，客户端在旧端口上仍保持的连接会收到 `503 gateway_port_changed`，请改用新端口。新请求使用新设置，正在进行的回复继续使用原设置。重启控制台会读取保存的配置并启动网关。用已设置的网关密钥再次登录。
@@ -141,6 +141,35 @@ npm start
 
 目录来自 Google 的 [Publisher Models 列表接口](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/rest/v1beta1/publishers.models/list)，自动分页并筛选 Gemini。它是发布目录，不能证明目标项目、地区、档位或某种模态可以调用。Express 的[公开接口范围](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/express-mode/api-reference)未保证模型列表；如果 API Key 被拒绝，页面显示真实 HTTP 状态，可手动添加或改用服务账号拉取。失败不会清空已有模型，也不会用内置目录伪装拉取成功。
 
+### 自定义上游
+
+除了 Google 官方的 Vertex，网关也能接**提供 Gemini 模型的 OpenAI 兼容服务**，例如中转站、new-api / one-api 一类的服务，或 Google AI Studio 的 OpenAI 兼容接口。在“连接配置”选 **自定义上游**，填两项：
+
+- **上游地址（Base URL）**：填到 `/v1` 这一级，例如 `https://relay.example.com/v1`。网关把请求发到“地址/chat/completions”，拉取目录时读“地址/models”。误把完整的 `…/chat/completions` 粘进来也能识别。`http://`（本机或内网服务）和 `https://` 都可以；地址里不能带账号密码、`?` 或 `#`。
+- **上游 API Key**：以 `Authorization: Bearer <key>` 发送，只能含可见 ASCII 字符，保存后不回显。
+
+模型照常在“模型与版本”添加。各家中转给模型起名的方式不一样，比如 `gemini-2.5-pro`、`google/gemini-2.5-pro`、`[满血]Gemini-2.5-Pro`，所以接自定义上游时，**上游模型名按页面上写的原样发送**，网关不加也不去前缀：
+
+- 拉取目录读取上游的模型列表，显示名字里带 `gemini`（不分大小写）的模型，名字保持列表里的原样。推荐从这里选，名字一定和上游一致。
+- 也可以手动填写，大写、括号、中文、带前缀都行；只要求不为空、不含换行等控制字符、最长 200 个字符。客户端模型名称会自动去掉不允许的字符，例如 `[满血]Gemini-2.5-Pro` 生成 `满血-Gemini-2.5-Pro`，可以再改。
+- 保存后，控制台会再读一次上游的模型列表（只读列表，不产生推理费用），把不在列表里的名字列出来提示，能找到相近名字时一并给出，例如“`google/gemini-3.7-flash`（列表里有：`gemini-3.7-flash`）”。只提示、不拦截，因为有的中转列表不全；读不到列表时也会说明没能核对。
+- 网关会从名字里认出它指的 Gemini 型号（比如从 `[满血]Gemini-4-Argon` 认出 `gemini-4-argon`），用来决定 Gemini 4 思考等级换算、预填充转 USER 等按型号生效的处理；只影响这些处理，不改发出去的名字。认不出时跳过这些处理，请求照常发送。
+
+从 Vertex 切到自定义上游时，原来的模型名是 `google/gemini-…` 的写法，会原样发出去；如果中转不认，保存后的核对会提示，按提示改名即可。反过来从自定义上游切回 Vertex 时，不符合 Vertex 写法的名字要先改掉才能保存。
+
+和接 Vertex 相比的差别：
+
+| 项目 | 自定义上游 |
+| --- | --- |
+| 服务等级、地区、项目 ID | 不使用；计费和能用哪些模型由上游决定 |
+| 正常版本 | 原样转发 |
+| 非流式抗截断 | 可用，前提是上游支持 OpenAI 工具调用并遵守强制调用（`tool_choice`） |
+| 流式抗截断 | 可用，但走兼容接口，不是 Vertex 原生参数流。正文能否边写边显示，取决于上游会不会分段转发工具参数；不分段时会等上游写完再一次到达。请求日志的传输方式显示“兼容接口回退（可能等全文）” |
+| 思考等级等 Gemini 专用参数 | 照原样放进请求（如 `extra_body.google`），上游是否理会由上游决定 |
+| [费用估算](#用量与费用估算) | 不估算；上游报告了用量时，日志只记 token 数 |
+
+上游不支持工具调用时，抗截断起不了作用：上游可能直接报错，也可能忽略工具、照常返回正文（请求日志显示“未还原”）。这种情况请改用正常版本。酒馆插件（Vertex 连接面板）不使用这项设置。
+
 ### 仅命令行模式
 
 将 `.env.example` 复制为 `.env`：Windows PowerShell 使用 `Copy-Item .env.example .env`；Linux/macOS 使用 `cp .env.example .env`。然后填写：
@@ -148,7 +177,7 @@ npm start
 - `GATEWAY_API_KEY`：自己生成的随机本地访问密钥，至少 16 个可见 ASCII 字符，不含空格。
 - `VERTEX_PROJECT_ID`：Google Cloud 项目 ID。`VERTEX_LOCATION` 默认 `global`。
 - `GOOGLE_APPLICATION_CREDENTIALS`：`.env.example` 中这一行默认被注释。使用服务账号时删掉行首的 `#`，填写仓库之外的服务账号 JSON 路径。Windows 可写成 `C:/keys/service-account.json`。
-- 如需用短期 Google OAuth access token，保持上一项注释，改填 `VERTEX_ACCESS_TOKEN`。快速模式改填 `VERTEX_API_KEY`，不要求项目 ID。三种鉴权方式只能选一种；一种都没设置时，`npm run gateway` 会提示 `Configure one Google authentication method: …` 并退出。
+- 如需用短期 Google OAuth access token，保持上一项注释，改填 `VERTEX_ACCESS_TOKEN`。快速模式改填 `VERTEX_API_KEY`，不要求项目 ID。[自定义上游](#自定义上游)改填 `CUSTOM_UPSTREAM_URL` 和 `CUSTOM_UPSTREAM_API_KEY`，不要求项目 ID。这几种方式只能选一种；一种都没设置时，`npm run gateway` 会提示 `Configure one upstream authentication method: …` 并退出。
 - `VERTEX_SERVICE_TIER`：`standard`（默认）、`flex` 或 `priority`。`ANTI_TRUNCATION=false` 可关闭包装。
 - `PORT`：默认 `4781`。
 
@@ -261,6 +290,20 @@ Express 和 Flex 的普通/流式请求均走原生接口。完整模式（服�
 ## 查看验收结果
 
 JSON 日志记录请求 ID、状态、耗时和 `antiTruncation` 元数据，不记录提示词、回复正文、工具参数或密钥。`GET /admin/events` 返回进程内最近 200 条记录，重启后清空。需要持久日志时，将标准输出重定向到仓库之外。
+
+### 用量与费用估算
+
+上游报告了用量时，每条记录带 `usage`（`promptTokens` 输入、`cachedTokens` 其中命中缓存的部分、`outputTokens` 输出，含思考）和 `estimatedCostUsd`（美元），请求日志的“用量 / 估算费用”一列显示同样的数字。为了拿到用量，网关在请求 Vertex 兼容接口的流式回复时会附带 `stream_options.include_usage`；客户端自己没要用量时，这一段不会转发给客户端。
+
+估算用的是网关内置的 Google 官方价目（[Vertex 生成式 AI 价目](https://cloud.google.com/vertex-ai/generative-ai/pricing)，2026-10-17 核对），按以下规则计算：
+
+- 按请求日期选价：Gemini 3.6/3.7/3.8 Flash 的推广价到 2026-12-31，Gemini 4 Argon 到 2026-11-30，之后自动换成原价。推广价是 Google 以 50% 返还抵扣后的实付价。
+- 档位按上游实际报告的 `trafficType` 计：Priority 为 Standard 的 1.8 倍，Flex 为 0.5 倍；没报告时按所选档位计。预配吞吐量（Provisioned Throughput）不估算。
+- 非 global 地区的 Gemini 3 及更新模型加 10%；输入超过 20 万 token 时，2.5 Pro 和 3.1 Pro Preview 整个请求按长上下文价计。
+- 不估算：自定义上游（中转按自己的规则收费）、价目表没收录的模型（如 Gemini 3 Flash Preview，官方页面未列出其输出价）、上游没报告用量的请求（如中途失败或取消）。
+- 只计这次交回的上游回复的 token，不含缓存存储、联网搜索等其他费用；提示词重试时，被拒的第一次提交不计入。
+
+这是估算，以 Google Cloud 账单为准。Google 调价后需要更新 `src/pricing.mjs` 里的价目表。
 
 `/v1/chat/completions` 失败时返回 `{"error": {"code", "message", "type", "requestId", …}}`。常见错误码：`credential_error`（502，换取访问令牌失败，或密钥／令牌含中文引号等无法放进请求头的字符）、`upstream_unreachable`（502，连不上 Google：网络、DNS、TLS 或代理）、`upstream_http_error`（沿用 Google 的 HTTP 状态和 `Retry-After`）、`upstream_timeout`（504）、`request_too_large`（413，请求体超过 8 MiB；一直没传完的上传会在超时后以 504 结束）、`image_render_failed`（503，本地图片渲染失败）、`upstream_protocol_error`（502，上游回复格式异常或中途断开）。上游 HTTP 错误和输出开始前的上游错误事件（`upstream_stream_error`、`native_stream_error`）还会附带 `upstreamError`：Google 的 `status`、ErrorInfo `reason`，以及去除标记、邮箱、密钥类字符串、长令牌和本次凭据后的 `message`（最多 240 字符）。日志只记录 `status` 和 `reason`。
 

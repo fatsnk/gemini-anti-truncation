@@ -2,6 +2,20 @@
 
 中文 | [English](CHANGELOG.md)
 
+## 未发布 — 独立网关的自定义上游与费用估算
+
+`main` 上的改动，版本号仍为网关 0.9.1。只涉及独立网关，酒馆插件不变（服务端插件安装包会多带一个不被它调用的 `src/pricing.mjs`）。
+
+- 请求日志新增“用量 / 估算费用”：每条记录带 `usage`（输入、其中缓存命中、输出含思考）和按内置 Google 官方价目算出的 `estimatedCostUsd`。价目于 2026-10-17 从 Vertex 生成式 AI 价目页核对，按请求日期区分推广价、按上游报告的实际档位折算（Priority ×1.8、Flex ×0.5）、非 global 地区的 Gemini 3+ 加 10%，2.5 Pro 和 3.1 Pro Preview 超过 20 万输入 token 时按长上下文价。自定义上游、预配吞吐量和价目表未收录的模型不估算。
+- 为拿到流式回复的用量，网关请求 Vertex 兼容接口的流式回复时附带 `stream_options.include_usage`；客户端没要用量时，这一段不转发给客户端。自定义上游不附带。
+
+- 连接配置新增第四种方式 **自定义上游**：填写提供 Gemini 模型的 OpenAI 兼容服务的地址（到 `/v1` 一级）和 API Key。请求发往“地址/chat/completions”，以 `Authorization: Bearer` 鉴权。不使用 Vertex 的项目、地区和服务等级。命令行模式对应 `CUSTOM_UPSTREAM_URL` 与 `CUSTOM_UPSTREAM_API_KEY`。
+- 接自定义上游时，上游模型名按保存的原样发送，因为各家中转的命名方式不同。名字可以含大写、括号、中文或前缀（不能为空、不含控制字符、最长 200 个字符）。“拉取 Model List”读取“地址/models”，显示名字里带 `gemini` 的模型，保持列表原样。Gemini 4 思考等级换算等按型号生效的处理，按从名字里认出的 Gemini 型号进行，认不出时跳过。没有明确模型列表时，自定义上游的默认模型名是 `gemini-3.7-flash`。
+- 自定义上游保存后，控制台拿保存的模型名和上游的模型列表核对（只读列表，不发推理请求），把不在列表里的名字列出来提示，能找到相近名字时一并给出。只提示，不阻止保存。
+- 正常版本原样转发；两种抗截断版本都走兼容接口的合成工具传输。流式抗截断没有 Vertex 原生参数流，日志标为 `tool-transport-buffered-fields`，正文能否逐段到达取决于上游是否分段转发工具参数。
+- 命令行缺少或重复设置鉴权方式时的提示改为 `Configure one upstream authentication method: …` / `Configure exactly one upstream authentication method: …`，并列出 `CUSTOM_UPSTREAM_URL`。控制台中上游错误的标签从“Google：”改为“上游：”。
+- 验证：本地 224 项测试通过，其中新增配置校验、网关转发、模型目录、控制台保存、价目计算和日志用量的测试；用本机模拟的 OpenAI 兼容服务在控制台里走通了保存、拉取目录、一次流式抗截断测试，并在请求日志看到 token 用量；模拟服务的列表混用了 `gemini-3.7-flash`、`google/gemini-2.5-pro`、`[满血]Gemini-2.5-Pro` 三种写法，选中的名字原样到达模拟服务，列表里没有的 `google/gemini-3.7-flash` 在保存后被提示。没有连接真实的第三方中转，也没有发送真实 Vertex 请求，所以估算费用还没有和真实账单对照过。
+
 ## 独立网关 0.9.1 与 SillyTavern 集成 0.5.1 — 原生路线上的工具结果
 
 标签 `gateway-v0.9.1`（Docker 镜像 `0.9.1`）与 `sillytavern-v0.5.1`（一键安装包）位于同一提交。用到工具的请直接用本版替换 0.9.0/0.5.0。

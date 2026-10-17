@@ -68,6 +68,32 @@ test("Express API keys use a projectless global endpoint and explicit service-ti
   }
 });
 
+test("a custom OpenAI-compatible upstream keeps its own URL and key and never uses Vertex tiers or native requests", async () => {
+  const custom = { GATEWAY_API_KEY: env.GATEWAY_API_KEY, CUSTOM_UPSTREAM_URL: "https://relay.example.invalid/v1/chat/completions/", CUSTOM_UPSTREAM_API_KEY: "synthetic-relay-key" };
+  const config = await loadConfig({ ...custom, VERTEX_SERVICE_TIER: "flex", VERTEX_LOCATION: "us-central1" });
+  assert.equal(config.authMode, "custom");
+  assert.equal(config.baseUrl, "https://relay.example.invalid/v1");
+  assert.equal(await config.accessToken(), "synthetic-relay-key");
+  assert.deepEqual(config.tierHeaders, {});
+  assert.equal(config.nativeOnly, false);
+  assert.equal((await loadConfig({ ...custom, CUSTOM_UPSTREAM_URL: "http://127.0.0.1:3000" })).baseUrl, "http://127.0.0.1:3000");
+  for (const override of [
+    { CUSTOM_UPSTREAM_URL: "ftp://relay.example.invalid/v1" }, { CUSTOM_UPSTREAM_URL: "https://user:pass@relay.example.invalid/v1" },
+    { CUSTOM_UPSTREAM_URL: "https://relay.example.invalid/v1?key=synthetic" }, { CUSTOM_UPSTREAM_URL: "relay.example.invalid/v1" },
+    { CUSTOM_UPSTREAM_API_KEY: "" }, { CUSTOM_UPSTREAM_API_KEY: "contains whitespace" }, { VERTEX_ACCESS_TOKEN: "also-set" },
+  ]) {
+    await assert.rejects(loadConfig({ ...custom, ...override }), error => {
+      assert.equal(error.message.includes("synthetic"), false);
+      return true;
+    });
+  }
+  await assert.rejects(loadConfig({ ...custom, CUSTOM_UPSTREAM_API_KEY: "synthetic“relay”" }), { message: "CUSTOM_UPSTREAM_API_KEY must contain only visible ASCII characters" });
+  const visible = publicSettings({ ...DEFAULT_SETTINGS, authMode: "custom", customBaseUrl: "https://relay.example.invalid/v1", customApiKey: "synthetic-relay-key" });
+  assert.equal(visible.customApiKeySet, true);
+  assert.equal(visible.customBaseUrl, "https://relay.example.invalid/v1");
+  assert.equal(JSON.stringify(visible).includes("synthetic-relay-key"), false);
+});
+
 test("complete service accounts accept explicit target projects and reject invalid private keys locally", () => {
   const sa = { type: "service_account", project_id: "identity-project", client_email: "fixture@example.invalid", token_uri: "https://oauth2.googleapis.com/token",
     private_key: generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }) };
@@ -95,13 +121,13 @@ test("Unicode setting defaults off and validates a strict global boolean", async
 
 test("environment errors name their variable and an unedited .env.example still loads for GUI setup", async () => {
   const missing = join(tmpdir(), "vertex-config-missing-" + process.pid);
-  await assert.rejects(loadConfig({ ...env, GOOGLE_APPLICATION_CREDENTIALS: missing }), /GOOGLE_APPLICATION_CREDENTIALS, VERTEX_ACCESS_TOKEN or VERTEX_API_KEY/);
+  await assert.rejects(loadConfig({ ...env, GOOGLE_APPLICATION_CREDENTIALS: missing }), /GOOGLE_APPLICATION_CREDENTIALS, VERTEX_ACCESS_TOKEN, VERTEX_API_KEY or CUSTOM_UPSTREAM_URL/);
   await assert.rejects(loadConfig({ ...env, VERTEX_ACCESS_TOKEN: "", GOOGLE_APPLICATION_CREDENTIALS: missing }), /\(GOOGLE_APPLICATION_CREDENTIALS\)/);
   await assert.rejects(loadConfig({ ...env, GEMINI_PROMPT_RETRY_TEXT_FILE: missing }), /\(GEMINI_PROMPT_RETRY_TEXT_FILE\)/);
   const template = parseEnv(await readFile(new URL("../.env.example", import.meta.url), "utf8"));
   assert.equal((await settingsFromEnv(template)).serviceAccountJson, "");
   // The CLI names the choices when the template's credential lines are still commented out.
-  await assert.rejects(loadConfig({ ...template, GATEWAY_API_KEY: env.GATEWAY_API_KEY }), { message: "Configure one Google authentication method: GOOGLE_APPLICATION_CREDENTIALS, VERTEX_ACCESS_TOKEN or VERTEX_API_KEY" });
+  await assert.rejects(loadConfig({ ...template, GATEWAY_API_KEY: env.GATEWAY_API_KEY }), { message: "Configure one upstream authentication method: GOOGLE_APPLICATION_CREDENTIALS, VERTEX_ACCESS_TOKEN, VERTEX_API_KEY or CUSTOM_UPSTREAM_URL" });
 });
 
 test("keys and tokens must be visible ASCII so every client can send them in a header", async () => {

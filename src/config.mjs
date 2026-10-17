@@ -9,10 +9,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   projectId: "", location: "global", authMode: "service-account", serviceTier: "standard",
   port: 4781, timeoutMs: 600000, antiTruncation: true, models: null,
   hideUnavailableModels: true, geminiPrefillToUser: true, unicodeInput: false, imageInput: "off",
-  geminiPromptRetryEnabled: false, geminiPromptRetryText: "", geminiPromptRetryMatches: null,
-  gatewayKey: "", serviceAccountJson: "", apiKey: "", accessToken: "",
+  geminiPromptRetryEnabled: false, geminiPromptRetryText: "", geminiPromptRetryMatches: null, customBaseUrl: "",
+  gatewayKey: "", serviceAccountJson: "", apiKey: "", accessToken: "", customApiKey: "",
 });
-export const SECRET_FIELDS = ["gatewayKey", "serviceAccountJson", "apiKey", "accessToken"];
+export const SECRET_FIELDS = ["gatewayKey", "serviceAccountJson", "apiKey", "accessToken", "customApiKey"];
 
 function integer(value, fallback, min, max, name) {
   const number = value == null || value === "" ? fallback : Number(value);
@@ -27,7 +27,7 @@ const visibleAscii = value => /^[\x21-\x7e]+$/.test(value);
 
 export async function settingsFromEnv(env = process.env) {
   const file = env.GOOGLE_APPLICATION_CREDENTIALS;
-  if ([file, env.VERTEX_ACCESS_TOKEN, env.VERTEX_API_KEY].filter(Boolean).length > 1) throw new Error("Configure exactly one Google authentication method: GOOGLE_APPLICATION_CREDENTIALS, VERTEX_ACCESS_TOKEN or VERTEX_API_KEY");
+  if ([file, env.VERTEX_ACCESS_TOKEN, env.VERTEX_API_KEY, env.CUSTOM_UPSTREAM_URL].filter(Boolean).length > 1) throw new Error("Configure exactly one upstream authentication method: GOOGLE_APPLICATION_CREDENTIALS, VERTEX_ACCESS_TOKEN, VERTEX_API_KEY or CUSTOM_UPSTREAM_URL");
   let serviceAccountJson = "";
   if (file) {
     try { serviceAccountJson = (await readFile(file, "utf8")).replace(/^\uFEFF/, ""); }
@@ -49,7 +49,8 @@ export async function settingsFromEnv(env = process.env) {
     ...DEFAULT_SETTINGS, projectId: env.VERTEX_PROJECT_ID || "", location: env.VERTEX_LOCATION || "global",
     gatewayKey: env.GATEWAY_API_KEY || "", serviceAccountJson,
     accessToken: env.VERTEX_ACCESS_TOKEN || "", apiKey: env.VERTEX_API_KEY || "",
-    authMode: env.VERTEX_API_KEY ? "express" : env.VERTEX_ACCESS_TOKEN ? "access-token" : "service-account",
+    customBaseUrl: env.CUSTOM_UPSTREAM_URL || "", customApiKey: env.CUSTOM_UPSTREAM_API_KEY || "",
+    authMode: env.CUSTOM_UPSTREAM_URL ? "custom" : env.VERTEX_API_KEY ? "express" : env.VERTEX_ACCESS_TOKEN ? "access-token" : "service-account",
     serviceTier: env.VERTEX_SERVICE_TIER || "standard",
     port: integer(env.PORT, 4781, 1, 65535, "PORT"),
     timeoutMs: integer(env.UPSTREAM_TIMEOUT_MS, 600000, 1000, 1800000, "UPSTREAM_TIMEOUT_MS"),
@@ -62,9 +63,27 @@ export async function settingsFromEnv(env = process.env) {
   };
 }
 
+// An OpenAI-compatible service that serves Gemini models. It has no Vertex project, region,
+// service tier or native endpoint, so every request keeps the compatible format.
+function customConnection(s, requireAscii) {
+  const raw = s.customBaseUrl;
+  let url;
+  try { url = new URL(raw); } catch { throw new Error("Invalid CUSTOM_UPSTREAM_URL"); }
+  if (typeof raw !== "string" || raw.length > 2048 || /[?#]/.test(raw) || !["https:", "http:"].includes(url.protocol) || url.username || url.password) {
+    throw new Error("Invalid CUSTOM_UPSTREAM_URL");
+  }
+  const key = s.customApiKey;
+  if (typeof key !== "string" || !key || /\s/.test(key) || key.length > 8192) throw new Error("Invalid CUSTOM_UPSTREAM_API_KEY");
+  if (requireAscii && !visibleAscii(key)) throw new Error("CUSTOM_UPSTREAM_API_KEY must contain only visible ASCII characters");
+  // A pasted endpoint works as well as its base: requests go to <base>/chat/completions.
+  const baseUrl = url.href.replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
+  return { accessToken: async () => key, authMode: "custom", serviceTier: "standard", projectId: "", location: "", baseUrl, tierHeaders: {}, nativeOnly: false };
+}
+
 export function buildConnectionConfig(settings, { requireAscii = true } = {}) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
-  if (!["service-account", "express", "access-token"].includes(s.authMode)) throw new Error("Invalid authentication mode");
+  if (!["service-account", "express", "access-token", "custom"].includes(s.authMode)) throw new Error("Invalid authentication mode");
+  if (s.authMode === "custom") return customConnection(s, requireAscii);
   if (!["standard", "flex", "priority"].includes(s.serviceTier)) throw new Error("Invalid service tier");
   if (typeof s.projectId !== "string" || (s.projectId && !/^[a-zA-Z0-9][a-zA-Z0-9-]{0,127}$/.test(s.projectId))) throw new Error("Invalid VERTEX_PROJECT_ID");
   if (s.authMode !== "express" && !s.projectId) throw new Error("Invalid VERTEX_PROJECT_ID");
@@ -121,7 +140,7 @@ export function buildConfig(settings, { requireAscii = true } = {}) {
       matches.some(text => typeof text !== "string" || !text.trim() || text.length > 500))) {
     throw new Error("Prompt retry error matches must list 1-32 texts of at most 500 characters");
   }
-  const models = modelProfiles(s.models, s.antiTruncation);
+  const models = modelProfiles(s.models, s.antiTruncation, { custom: s.authMode === "custom" });
   return {
     ...buildConnectionConfig(s, { requireAscii }), gatewayKey: key, models,
     hideUnavailableModels: s.hideUnavailableModels, geminiPrefillToUser: s.geminiPrefillToUser, unicodeInput: s.unicodeInput, imageInput: s.imageInput,
@@ -137,14 +156,14 @@ export function buildConfig(settings, { requireAscii = true } = {}) {
 
 export async function loadConfig(env = process.env) {
   // The GUI can start without credentials; the CLI cannot, and an empty service-account JSON would hide why.
-  if (![env.GOOGLE_APPLICATION_CREDENTIALS, env.VERTEX_ACCESS_TOKEN, env.VERTEX_API_KEY].some(Boolean)) {
-    throw new Error("Configure one Google authentication method: GOOGLE_APPLICATION_CREDENTIALS, VERTEX_ACCESS_TOKEN or VERTEX_API_KEY");
+  if (![env.GOOGLE_APPLICATION_CREDENTIALS, env.VERTEX_ACCESS_TOKEN, env.VERTEX_API_KEY, env.CUSTOM_UPSTREAM_URL].some(Boolean)) {
+    throw new Error("Configure one upstream authentication method: GOOGLE_APPLICATION_CREDENTIALS, VERTEX_ACCESS_TOKEN, VERTEX_API_KEY or CUSTOM_UPSTREAM_URL");
   }
   return buildConfig(await settingsFromEnv(env));
 }
 
 export function publicSettings(settings) {
-  const result = { ...settings, models: modelProfiles(settings.models, settings.antiTruncation) };
+  const result = { ...settings, models: modelProfiles(settings.models, settings.antiTruncation, { custom: settings.authMode === "custom" }) };
   for (const name of SECRET_FIELDS) { delete result[name]; result[name + "Set"] = Boolean(settings[name]); }
   return result;
 }

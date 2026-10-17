@@ -5,7 +5,7 @@ import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildConfig, DEFAULT_SETTINGS, MODEL_ID, publicSettings } from "../src/config.mjs";
-import { modelProfiles } from "../src/model-profiles.mjs";
+import { geminiModelKey, modelProfiles } from "../src/model-profiles.mjs";
 import { discoverModels } from "../src/model-discovery.mjs";
 import { createGatewayServer } from "../src/gateway.mjs";
 import { createSettingsStore, mergeSettings } from "../src/settings-store.mjs";
@@ -32,6 +32,13 @@ test("model profiles preserve legacy modes, normalize IDs and reject duplicates,
     [{ ...profiles[0], upstreamModel: "gemini-a/../../metadata" }], [{ ...profiles[0], upstreamModel: "https://example.invalid" }],
     [{ ...profiles[0], mode: "unknown" }], [{ ...profiles[0], secret: "unexpected" }], Array(101).fill(profiles[0])]) assert.throws(() => modelProfiles(value));
   assert.equal(publicSettings(credentials).models[0].mode, "streaming");
+  // A custom upstream keeps names as written, trimmed; only empty, overlong or control-character names fail.
+  const custom = { custom: true };
+  assert.deepEqual(modelProfiles([{ ...profiles[0], upstreamModel: " google/Gemini-2.5-Pro [官转] " }], true, custom)[0].upstreamModel, "google/Gemini-2.5-Pro [官转]");
+  assert.equal(modelProfiles(null, true, custom)[0].upstreamModel, "gemini-3.7-flash");
+  for (const upstreamModel of ["", "   ", "x".repeat(201), "gemini\u0000", 42]) assert.throws(() => modelProfiles([{ ...profiles[0], upstreamModel }], true, custom), /custom upstream model name/);
+  assert.equal(geminiModelKey("[满血]Gemini-4-Argon（官转）"), "gemini-4-argon");
+  assert.equal(geminiModelKey("relay-default"), "");
 });
 
 test("discovery lists all pages with selected auth, deduplicates Gemini models and never sends inference or tier headers", async () => {
@@ -105,6 +112,30 @@ async function gateway(t, authMode = "express", mock) {
   const post = (model, stream, extra = {}) => fetch(base + "/v1/chat/completions", { method: "POST", headers: { authorization: "Bearer " + credentials.gatewayKey, "content-type": "application/json" }, body: JSON.stringify({ model, messages: [{ role: "user", content: "Fixture" }], stream, ...extra }) });
   return { config, base, post, requests, events };
 }
+
+test("custom upstream discovery reads its OpenAI model list with the custom key and keeps the names it lists", async () => {
+  const config = buildConfig({ ...credentials, authMode: "custom", customBaseUrl: "https://relay.example.invalid/v1", customApiKey: "synthetic-relay-key" });
+  const requests = [];
+  const result = await discoverModels(config, { fetchImpl: async (input, init) => {
+    requests.push(input);
+    assert.equal(input, "https://relay.example.invalid/v1/models");
+    assert.equal(init.method, "GET");
+    assert.deepEqual(init.headers, { authorization: "Bearer synthetic-relay-key" });
+    return Response.json({ object: "list", data: [{ id: "gemini-fixture-b" }, { id: "google/gemini-fixture-a" }, { id: "[满血]Gemini-Fixture" }, { id: "gpt-fixture" },
+      { id: "gemini-fixture-b" }, { id: "gemini\ncontrol" }, { id: 42 }, {}] });
+  } });
+  assert.equal(requests.length, 1);
+  // Names stay as listed; the picker shows those that mention Gemini, the save check uses them all.
+  assert.deepEqual(result.models.map(m => m.upstreamModel), ["[满血]Gemini-Fixture", "gemini-fixture-b", "google/gemini-fixture-a"]);
+  assert.deepEqual(result.models[0], { id: "[满血]Gemini-Fixture", upstreamModel: "[满血]Gemini-Fixture", displayName: "[满血]Gemini-Fixture" });
+  assert.deepEqual(result.ids, ["[满血]Gemini-Fixture", "gemini-fixture-b", "google/gemini-fixture-a", "gpt-fixture"]);
+  assert.equal(result.source, "custom-upstream-models");
+  await assert.rejects(discoverModels(config, { fetchImpl: async () => new Response("synthetic-relay-key", { status: 401 }) }),
+    { message: "Custom upstream model listing failed (HTTP 401); add a model ID manually" });
+  await assert.rejects(discoverModels(config, { fetchImpl: async () => Response.json({ models: [] }) }), { message: "Invalid model catalog response" });
+  await assert.rejects(discoverModels(config, { fetchImpl: async () => { throw new TypeError("fetch failed"); } }),
+    { message: "Unable to reach the custom upstream; check its URL and the connection" });
+});
 
 test("saved aliases route different upstreams and three modes in JSON and SSE for Express and OAuth", async t => {
   for (const authMode of ["express", "access-token"]) {

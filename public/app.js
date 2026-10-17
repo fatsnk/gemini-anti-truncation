@@ -1,6 +1,6 @@
 "use strict";
 const $ = id => document.getElementById(id);
-const authNames = { "service-account": "完整模式 · 服务账号", express: "快速模式 · API Key", "access-token": "临时 OAuth 令牌" };
+const authNames = { "service-account": "完整模式 · 服务账号", express: "快速模式 · API Key", "access-token": "临时 OAuth 令牌", custom: "自定义上游 · OpenAI 兼容" };
 const tierNames = { standard: "Standard", flex: "Flex", priority: "Priority" };
 const pageNames = { overview: "总览", connection: "连接配置", models: "模型与版本", events: "请求日志", test: "连接测试" };
 const modeNames = { normal: "正常", buffered: "非流式抗截断", streaming: "流式抗截断" };
@@ -12,6 +12,7 @@ const replyInterrupted = "回复中途中断（网关已断开连接），请按
 const state = { csrf: null, config: null, status: null, events: [], dirty: false, page: "overview", probe: null, timer: null,
   models: [], catalog: null, selected: new Set(), forcedGlobal: false, userLocation: "global", pendingDraft: null, refreshError: null, rendered: {} };
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const upstreamHost = url => { try { return new URL(url).host; } catch { return url; } };
 let toastTimer;
 function toast(message) { $("toast").textContent = message; $("toast").hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $("toast").hidden = true; }, 4000); }
 function errorMessage(message) {
@@ -27,6 +28,10 @@ function errorMessage(message) {
     "GATEWAY_API_KEY must contain only visible ASCII characters": "本地网关密钥只能包含可见 ASCII 字符（英文字母、数字和半角符号），请检查是否混入中文引号或全角字符，并在连接配置中更换后保存。",
     "VERTEX_API_KEY must contain only visible ASCII characters": "Express API Key 只能包含可见 ASCII 字符，请检查是否混入中文引号或全角字符，并在连接配置中重新粘贴后保存。",
     "VERTEX_ACCESS_TOKEN must contain only visible ASCII characters": "OAuth Access Token 只能包含可见 ASCII 字符，请检查是否混入中文引号或全角字符，并在连接配置中重新粘贴后保存。",
+    "Invalid CUSTOM_UPSTREAM_URL": "请填写有效的上游地址：以 http:// 或 https:// 开头，不含账号密码、? 和 #，例如 https://relay.example.com/v1。",
+    "Invalid CUSTOM_UPSTREAM_API_KEY": "请输入上游 API Key，不能含空格。",
+    "CUSTOM_UPSTREAM_API_KEY must contain only visible ASCII characters": "上游 API Key 只能包含可见 ASCII 字符，请检查是否混入中文引号或全角字符，并在连接配置中重新粘贴后保存。",
+    "Unable to reach the custom upstream; check its URL and the connection": "无法连接自定义上游，请检查上游地址和网络后重试。",
     "Configuration changed; reload before saving": "配置已被其他页面修改，请先放弃当前修改并重新加载。",
     "Configuration is being edited by another process": "配置正在被另一个进程保存，请稍后重试。",
     "Port is unavailable; the running service has not been changed": "端口已被占用，当前服务保持原状，请更换端口。",
@@ -40,7 +45,8 @@ function errorMessage(message) {
     "missing_finish_reason": "上游回复缺少结束原因。",
     "upstream_http_error": "上游拒绝了请求，请检查凭据、模型权限、额度及所选档位。",
     "unsupported_native_fields": "此请求含原生接口无法保留的字段，请改用标准服务账号模式或移除不支持的字段。",
-    "Invalid upstream Gemini model ID": "请输入有效的 Gemini 上游模型 ID，例如 gemini-3.7-flash。",
+    "Invalid upstream Gemini model ID": "请输入有效的 Gemini 上游模型 ID，例如 gemini-3.7-flash。从自定义上游切回 Vertex 时，不符合这种写法的上游模型名需要先改掉。",
+    "Invalid custom upstream model name": "上游模型名不能为空，不能含换行等控制字符，最长 200 个字符。",
     "Invalid public model ID": "客户端模型名称限 160 字符，可用中文、字母、数字、点、短横线、下划线及 @；不能包含空格。",
     "Model IDs must be unique": "客户端模型名称重复，请给每个版本使用不同名称。",
     "Model list must contain at most 100 entries": "最多可保存 100 个模型版本。",
@@ -78,10 +84,10 @@ function errorMessage(message) {
     "The gateway did not respond in time": "本地网关在超时时间内没有响应。稍后可在请求日志查看这次请求的结果。",
     "Cannot reach the local gateway": "控制台连接不上本地网关，请在总览确认网关正在运行。",
     "Unable to read the Google service-account file (GOOGLE_APPLICATION_CREDENTIALS)": "无法读取 GOOGLE_APPLICATION_CREDENTIALS 指向的服务账号文件。",
-    "Configure exactly one Google authentication method: GOOGLE_APPLICATION_CREDENTIALS, VERTEX_ACCESS_TOKEN or VERTEX_API_KEY": "GOOGLE_APPLICATION_CREDENTIALS、VERTEX_ACCESS_TOKEN 和 VERTEX_API_KEY 只能设置其中一个。",
+    "Configure exactly one upstream authentication method: GOOGLE_APPLICATION_CREDENTIALS, VERTEX_ACCESS_TOKEN, VERTEX_API_KEY or CUSTOM_UPSTREAM_URL": "GOOGLE_APPLICATION_CREDENTIALS、VERTEX_ACCESS_TOKEN、VERTEX_API_KEY 和 CUSTOM_UPSTREAM_URL 只能设置其中一个。",
     "Unable to read the prompt retry text file (GEMINI_PROMPT_RETRY_TEXT_FILE)": "无法读取 GEMINI_PROMPT_RETRY_TEXT_FILE 指向的重试文本文件。",
     "credential_error": "凭据无效或无法换取访问令牌：检查密钥/令牌是否含中文引号、全角字符等非 ASCII 字符，服务账号 JSON 是否被删除或停用，系统时间，以及到 oauth2.googleapis.com 的网络。",
-    "upstream_unreachable": "无法连接 Google：请检查网络、代理和 DNS。",
+    "upstream_unreachable": "无法连接上游：请检查网络、代理和 DNS；使用自定义上游时再核对上游地址。",
     "upstream_protocol_error": "上游回复格式异常或中途断开，可以重试；反复出现时请在请求日志查看详情。",
     "upstream_stream_error": "上游在流式回复中返回了错误，可以重试；若附带 Google 的错误信息，请据此检查。",
     "native_stream_error": "上游原生流式回复返回了错误，可以重试；若附带 Google 的错误信息，请据此检查。",
@@ -109,6 +115,7 @@ function errorMessage(message) {
   if (toggle) return `环境变量 ${toggle[1]} 只能是 true 或 false。`;
   if (message?.startsWith("anti_truncation_")) return `抗截断正文还原失败（${message}），可以重试，或用正常版本对比。`;
   if (message?.startsWith("Express model listing is unavailable")) return `当前 Express API Key 无法读取模型目录（${message.match(/HTTP \d+/)?.[0] || "访问受限"}）。可以手动添加模型 ID，或改用服务账号拉取；已保存的模型不受影响。`;
+  if (message?.startsWith("Custom upstream model listing failed")) return `自定义上游的模型列表返回 ${message.match(/HTTP \d+/)?.[0] || "错误"}，请检查上游地址和 API Key，或手动添加模型 ID。`;
   if (message?.startsWith("Vertex model listing failed")) return `Google 模型目录返回 ${message.match(/HTTP \d+/)?.[0] || "错误"}，请检查鉴权与 API 权限，或手动添加模型 ID。`;
   // Integrity and protocol codes without their own entry keep the raw code visible.
   if (!messages[message] && /^[a-z][a-z0-9_]*$/.test(message || "")) return `网关返回错误码 ${message}，可以重试；反复出现时请记下错误码和请求 ID 排查。`;
@@ -165,14 +172,14 @@ function showLogin(expired) {
   if (!$("app-view").hidden) {
     // A lost session keeps the unapplied draft for the next sign-in, without credentials.
     if (expired && state.dirty) {
-      const { gatewayKey, serviceAccountJson, apiKey, accessToken, ...settings } = draft();
+      const { gatewayKey, serviceAccountJson, apiKey, accessToken, customApiKey, ...settings } = draft();
       state.pendingDraft = { settings, revision: state.config.revision, userLocation: state.userLocation };
     } else state.pendingDraft = null;
     state.dirty = Boolean(state.pendingDraft);
   }
   state.csrf = null; clearInterval(state.timer); state.probe?.abort();
   $("login-view").hidden = false; $("app-view").hidden = true;
-  for (const id of ["gateway-key", "service-account", "api-key", "access-token"]) $(id).value = "";
+  for (const id of ["gateway-key", "service-account", "api-key", "access-token", "custom-api-key"]) $(id).value = "";
   setError("login-error", expired ? "登录已过期，请重新登录。" + (state.pendingDraft ? "未应用的修改会在登录后恢复，凭据需重新输入。" : "") : "");
   $("login-key").focus();
   // Setup may have finished in this tab since load, so ask again which key the card should request.
@@ -182,7 +189,7 @@ function loginCopy(setup) {
   $("login-title").textContent = setup ? "首次设置" : "进入本地控制台";
   $("login-description").textContent = setup ? "请打开启动终端中的首次设置链接，或输入链接中的设置密钥。" : "输入网关密钥，管理你的 Vertex 连接。";
 }
-const credentialFields = { "service-account": ["serviceAccountJson", "服务账号 JSON"], express: ["apiKey", "Express API Key"], "access-token": ["accessToken", "OAuth 令牌"] };
+const credentialFields = { "service-account": ["serviceAccountJson", "服务账号 JSON"], express: ["apiKey", "Express API Key"], "access-token": ["accessToken", "OAuth 令牌"], custom: ["customApiKey", "自定义上游 API Key"] };
 // Other modes' credentials stored in settings.json. Before the first save they come from the
 // environment, and that save already keeps only the selected mode's credential.
 const otherCredentials = authMode => state.config?.saved ? Object.entries(credentialFields)
@@ -197,6 +204,7 @@ function draft() {
     projectId: $("project-id").value.trim(), location: $("location").value.trim(),
     gatewayKey: $("gateway-key").value.trim(), serviceAccountJson: credential("service-account", "service-account"),
     apiKey: credential("api-key", "express"), accessToken: credential("access-token", "access-token"),
+    customBaseUrl: $("custom-base-url").value.trim(), customApiKey: credential("custom-api-key", "custom"),
     port: Number($("port").value), timeoutMs: Number($("timeout").value) * 1000, antiTruncation: true, models: state.models.map(m => ({ ...m })),
     unicodeInput: $("unicode-input").checked, imageInput: $("image-input").value, hideUnavailableModels: $("hide-unavailable").checked, geminiPrefillToUser: $("prefill-to-user").checked,
     geminiPromptRetryEnabled: $("prompt-retry-enabled").checked, geminiPromptRetryText: $("prompt-retry-text").value,
@@ -234,22 +242,27 @@ function updateDraft(dirty = true) {
     state.forcedGlobal = forcedGlobal;
   }
   if (forcedGlobal) $("location").value = "global";
-  $("location").disabled = forcedGlobal;
-  $("project-id").required = d.authMode !== "express";
+  const custom = d.authMode === "custom";
+  // Hidden fields must not block saving through their own browser validation.
+  $("location").disabled = forcedGlobal || custom;
+  $("project-id").required = !["express", "custom"].includes(d.authMode);
   $("project-optional").hidden = d.authMode !== "express";
   $("project-help").textContent = d.authMode === "express" ? "快速模式由 API Key 确定项目；这里可选填备注。" : "填写目标 Google Cloud 项目 ID，可与服务账号所属项目不同。";
   $("credential-service").hidden = d.authMode !== "service-account";
   $("credential-express").hidden = d.authMode !== "express";
   $("credential-token").hidden = d.authMode !== "access-token";
+  $("vertex-fields").hidden = custom; $("credential-custom").hidden = !custom; $("tier-options").hidden = custom;
   const others = otherCredentials(d.authMode);
   $("clear-other-row").hidden = !others.length;
   $("clear-other-label").textContent = "保存时删除其他鉴权方式已保存的凭据：" + others.map(([, label]) => label).join("、");
-  $("preview-auth").textContent = authNames[d.authMode]; $("preview-tier").textContent = tierNames[d.serviceTier];
-  $("preview-location").textContent = $("location").value || "—"; $("preview-port").textContent = d.port || "—";
+  $("preview-auth").textContent = authNames[d.authMode]; $("preview-tier").textContent = custom ? "不适用" : tierNames[d.serviceTier];
+  $("preview-location-label").textContent = custom ? "上游" : "地区";
+  $("preview-location").textContent = (custom ? upstreamHost(d.customBaseUrl) : $("location").value) || "—"; $("preview-port").textContent = d.port || "—";
   $("tier-help").textContent = d.serviceTier === "standard" ? "使用标准档位，不自动升级服务等级。" : d.serviceTier === "flex"
     ? "Flex 使用原生接口，响应等待可能更长。账户和模型须支持该档位；失败时不会自动切换为 Standard。"
     : "Priority 使用优先按量服务，按对应档位计费。实际是否使用 Priority 请查看请求日志中的上游档位。";
   if (d.authMode === "express" && d.serviceTier !== "standard") $("tier-help").textContent += " Express 的档位可用性由上游决定。";
+  if (custom) $("tier-help").textContent = "自定义上游不使用 Vertex 的服务等级和地区，计费和可用模型由上游决定。它没有 Vertex 原生参数流，流式抗截断改走兼容接口，正文可能等上游写完后一次到达。";
   $("draft-label").textContent = state.dirty ? "有未应用的修改" : "配置已同步";
   $("models-draft-label").textContent = state.dirty ? "有未应用的修改" : "配置已同步";
   $("models-count").textContent = state.models.length + " 个版本";
@@ -265,7 +278,7 @@ function fillConfig(c = state.config.settings) {
     const radios = [...document.querySelectorAll(`[name="${name}"]`)];
     (radios.find(el => el.value === c[name]) || radios[0]).checked = true;
   }
-  for (const [id, name] of [["project-id", "projectId"], ["location", "location"], ["port", "port"]]) $(id).value = c[name];
+  for (const [id, name] of [["project-id", "projectId"], ["location", "location"], ["port", "port"], ["custom-base-url", "customBaseUrl"]]) $(id).value = c[name];
   $("timeout").value = c.timeoutMs / 1000;
   $("unicode-input").checked = c.unicodeInput === true;
   $("image-input").value = c.imageInput || "off";
@@ -275,15 +288,15 @@ function fillConfig(c = state.config.settings) {
   $("prompt-retry-text").value = c.geminiPromptRetryText || "";
   $("prompt-retry-matches").value = (c.geminiPromptRetryMatches || []).join("\n");
   state.models = c.models.map(m => ({ ...m })); renderModels();
-  for (const [id, name] of [["gateway-key", "gatewayKey"], ["service-account", "serviceAccountJson"], ["api-key", "apiKey"], ["access-token", "accessToken"]]) {
-    $(id).value = ""; $(id).placeholder = saved[name + "Set"] ? (state.config.saved ? "已保存 · 留空保留，输入则替换" : "已从环境变量导入 · 留空沿用，输入则替换") : ({ gatewayKey: "至少 16 个可见 ASCII 字符，或生成随机密钥",serviceAccountJson: "粘贴完整的服务账号 JSON，或导入文件", apiKey: "输入 Vertex Express API Key", accessToken: "输入短期 Google OAuth 令牌" })[name];
+  for (const [id, name] of [["gateway-key", "gatewayKey"], ["service-account", "serviceAccountJson"], ["api-key", "apiKey"], ["access-token", "accessToken"], ["custom-api-key", "customApiKey"]]) {
+    $(id).value = ""; $(id).placeholder = saved[name + "Set"] ? (state.config.saved ? "已保存 · 留空保留，输入则替换" : "已从环境变量导入 · 留空沿用，输入则替换") : ({ gatewayKey: "至少 16 个可见 ASCII 字符，或生成随机密钥",serviceAccountJson: "粘贴完整的服务账号 JSON，或导入文件", apiKey: "输入 Vertex Express API Key", accessToken: "输入短期 Google OAuth 令牌", customApiKey: "输入上游 API Key" })[name];
   }
   $("service-file").value = ""; $("clear-other").checked = false;
   state.dirty = false; $("saved-badge").textContent = state.config.saved ? "已保存到本机" : "尚未保存";
   state.forcedGlobal = false;
   updateDraft(false);
 }
-const isReady = c => Boolean(c.gatewayKeySet && (c.authMode === "service-account" ? c.serviceAccountJsonSet : c.authMode === "express" ? c.apiKeySet : c.accessTokenSet));
+const isReady = c => Boolean(c.gatewayKeySet && c[credentialFields[c.authMode]?.[0] + "Set"]);
 function renderStatus() {
   const s = state.status, c = state.config.settings, current = s.active;
   const ready = isReady(c);
@@ -291,7 +304,8 @@ function renderStatus() {
   $("rail-status").textContent = label; $("rail-lamp").className = "lamp " + (s.running ? "" : "idle");
   $("metric-status").textContent = label; $("metric-active").textContent = s.running ? s.activeRequests + " 个进行中的请求" : "本地 API 尚未监听";
   $("metric-requests").textContent = s.requests; $("metric-restored").textContent = s.restored;
-  $("metric-tier").textContent = tierNames[current?.serviceTier || c.serviceTier];
+  const shown = current || c, custom = shown.authMode === "custom";
+  $("metric-tier").textContent = custom ? "不适用" : tierNames[shown.serviceTier];
   $("metric-traffic").textContent = "最近实际上游：" + (s.lastTrafficType || "尚无记录");
   $("runtime-badge").textContent = s.running ? "●  API ONLINE" : "●  " + label;
   $("runtime-badge").className = "badge " + (s.running ? "go" : "hold");
@@ -308,8 +322,9 @@ function renderStatus() {
   $("listen-scope").textContent = allInterfaces ? "容器 / 网络访问" : "仅限本机 · 127.0.0.1";
   $("port-help").textContent = allInterfaces ? "Docker 默认映射到容器 4781；修改此端口后需同步修改容器端口映射。" : "仅监听 127.0.0.1，与控制台端口分开。";
   $("overview-auth").textContent = current ? authNames[current.authMode] : "未启动";
-  $("overview-project").textContent = (current || c).authMode === "express" ? "Express · 由 API Key 确定" : (current || c).projectId || "—";
-  $("overview-location").textContent = (current || c).location;
+  $("overview-project").textContent = custom ? "不适用" : shown.authMode === "express" ? "Express · 由 API Key 确定" : shown.projectId || "—";
+  $("overview-location-label").textContent = custom ? "上游" : "地区";
+  $("overview-location").textContent = custom ? upstreamHost(shown.customBaseUrl) : shown.location;
   const models = s.running ? s.models : c.models;
   const hidden = new Set((s.modelAvailability || []).filter(m => m.hidden).map(m => m.id));
   $("overview-anti").textContent = models.length + " 个独立版本" + (s.running ? " · " + hidden.size + " 个已隐藏" : "");
@@ -327,6 +342,7 @@ function updateProbeModel() {
   const retry = s?.active?.geminiPromptRetryEnabled;
   $("probe-cost-notice").textContent = retry
     ? "重试功能已开启：此次测试最多发送 2 次上游请求，每次最多 512 个输出 tokens。重试会带上自定义文本，增加输入用量和费用。"
+    : s?.active?.authMode === "custom" ? "测试将使用已应用的自定义上游发送一次真实请求，可能按上游的规则计费。"
     : "测试将使用已应用的凭据与服务等级发送一次真实请求，可能产生 Google Cloud 费用。";
   $("probe-consent-label").textContent = retry ? "我同意此次真实测试及最多 1 次自动重试" : "我同意发送这一次真实测试请求";
   $("probe-model-help").textContent = row ? `${row.upstreamModel} · ${modeNames[row.mode]}` + (row.mode === "buffered" ? " · 完整回复到齐后交付正文。" : "")
@@ -339,7 +355,7 @@ function updateProbeModel() {
 function renderModels() {
   $("model-rows").innerHTML = state.models.length ? state.models.map((m, i) => `<div class="model-row" data-row="${i}">
     <label>客户端模型名称<input data-field="id" value="${esc(m.id)}" maxlength="160" spellcheck="false" aria-label="客户端模型名称（模型 ${i + 1}）"></label>
-    <label>上游模型 ID<input data-field="upstreamModel" value="${esc(m.upstreamModel)}" maxlength="180" spellcheck="false" aria-label="上游模型 ID（模型 ${i + 1}）"></label>
+    <label>上游模型 ID<input data-field="upstreamModel" value="${esc(m.upstreamModel)}" maxlength="200" spellcheck="false" aria-label="上游模型 ID（模型 ${i + 1}）"></label>
     <label>传输模式<select data-field="mode" aria-label="模型 ${i + 1} 的传输模式">${Object.entries(modeNames).map(([v, label]) => `<option value="${v}"${v === m.mode ? " selected" : ""}>${label}</option>`).join("")}</select></label>
     <div class="model-actions"><label class="model-enabled"><input type="checkbox" data-field="enabled"${m.enabled !== false ? " checked" : ""} aria-label="启用模型 ${i + 1}">启用</label><button class="btn ghost remove-model" data-remove="${i}" aria-label="移除模型 ${i + 1}">移除</button></div></div>`).join("") : '<div class="empty-state"><strong>还没有模型版本</strong><p>从目录选择或手动添加。保存空列表后，客户端将没有可选模型。</p></div>';
 }
@@ -358,11 +374,20 @@ function addModels(upstreams) {
   const modes = [...document.querySelectorAll('[name="newMode"]:checked')].map(el => el.value);
   if (!modes.length) throw new Error("请至少勾选一种版本。");
   const next = state.models.map(m => ({ ...m })); let added = 0, skipped = 0;
+  const custom = draft().authMode === "custom";
   for (const raw of upstreams) {
-    const id = raw.trim().replace(/^(?:google\/|publishers\/google\/models\/)/, "");
-    if (!/^gemini-[a-z0-9][a-z0-9._-]{0,126}(?:@[a-z0-9-]{1,32})?$/.test(id) || id.includes("..")) throw new Error(errorMessage("Invalid upstream Gemini model ID"));
+    let id, upstreamModel;
+    if (custom) {
+      // A custom upstream gets the name exactly as written; the client name keeps only allowed characters.
+      upstreamModel = raw.trim();
+      if (!upstreamModel || upstreamModel.length > 200 || /[\u0000-\u001f\u007f]/.test(upstreamModel)) throw new Error(errorMessage("Invalid custom upstream model name"));
+      id = upstreamModel.replace(/^(?:google|models)\//, "").replace(/[^\p{L}\p{N}._@-]+/gu, "-").replace(/^[^\p{L}\p{N}]+|-+$/gu, "") || "model";
+    } else {
+      id = raw.trim().replace(/^(?:google\/|publishers\/google\/models\/)/, "");
+      if (!/^gemini-[a-z0-9][a-z0-9._-]{0,126}(?:@[a-z0-9-]{1,32})?$/.test(id) || id.includes("..")) throw new Error(errorMessage("Invalid upstream Gemini model ID"));
+      upstreamModel = "google/" + id;
+    }
     for (const mode of modes) {
-      const upstreamModel = "google/" + id;
       if (next.some(m => m.upstreamModel === upstreamModel && m.mode === mode)) { skipped++; continue; }
       const base = id + ({ normal: "", buffered: "-antitruncation-nonstream", streaming: "-antitruncation-stream" })[mode];
       let alias = base.slice(0, 150), suffix = 2;
@@ -397,15 +422,23 @@ function inputBadge(e) {
     (unicode ? "<small>" + (unicode.reason === "encoded" ? `Unicode 已转码 ${esc(unicode.occurrences)} 处 · ${esc(unicode.matchedMessages)} 条消息 · ${esc(unicode.encodedCharacters)} 字符`
       : "Unicode 跳过：" + (unicodeReasons[unicode.reason] || "未知")) + "</small>" : "");
 }
+// Token counts and the gateway's estimate from Google's list prices; the bill is authoritative.
+function usageCell(e) {
+  const u = e.usage, cost = e.estimatedCostUsd, count = n => esc(Number(n).toLocaleString("zh-CN"));
+  if (!u) return '<td>—<small>上游未报告用量</small></td>';
+  const price = typeof cost === "number" ? `<small title="按 Google 官方价目估算，不含缓存存储、联网搜索等其他费用，以账单为准">≈ $${esc(cost >= 0.01 ? cost.toFixed(4) : cost.toPrecision(2))}</small>`
+    : '<small title="自定义上游、预配吞吐量和价目表未收录的模型不估算">无官方单价</small>';
+  return `<td><span class="mono">${count(u.promptTokens)} 入 · ${count(u.outputTokens)} 出</span>${u.cachedTokens ? `<small>其中缓存 ${count(u.cachedTokens)}</small>` : ""}${price}</td>`;
+}
 function eventTable(events) {
   if (!events.length) return '<div class="empty-state"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 4h18v24H7zM11 10h10M11 15h10M11 20h6"/></svg><strong>暂无请求记录</strong><p>向网关发送请求后，传输与还原状态会显示在这里。</p></div>';
-  return '<div class="table-wrap"><table><thead><tr><th>时间 / 请求</th><th>模型版本</th><th>状态</th><th>传输</th><th>正文还原</th><th>请求 / 实际档位</th><th>耗时</th></tr></thead><tbody>' + events.map(e => {
+  return '<div class="table-wrap"><table><thead><tr><th>时间 / 请求</th><th>模型版本</th><th>状态</th><th>传输</th><th>正文还原</th><th>请求 / 实际档位</th><th>用量 / 估算费用</th><th>耗时</th></tr></thead><tbody>' + events.map(e => {
     const a = e.antiTruncation || {};
     const recovered = a.restored === true ? "已还原" : a.restored === false ? "未还原 / 跳过" : "未确认";
     // Pass-through requests keep the plain stream label; every audited transport, fallback and skip reason has its own.
     const transport = transportNames[a.transport] || (!a.transport || a.transport === "disabled" ? (e.stream ? "SSE 流式" : "普通响应") : a.transport);
     const success = e.status >= 200 && e.status < 300;
-    return `<tr><td><span class="mono">${esc(new Date(e.at).toLocaleTimeString("zh-CN", { hour12: false }))}</span><small title="${esc(e.requestId)}">${esc(e.requestId.slice(0, 8))}</small></td><td><span class="mono">${esc(e.model || "—")}</span><small>${esc(modeNames[e.mode] || "")}</small></td><td><span class="badge ${success ? "go" : "stop"}">${e.status}</span>${e.code ? `<small class="error-code" title="${esc(errorMessage(e.code))}">${esc(e.code)}</small>` : ""}${integrityBadge(e.responseIntegrity)}${e.upstreamError ? `<small>Google：${esc([e.upstreamError.status, e.upstreamError.reason].filter(Boolean).join(" · "))}</small>` : ""}${compatibilityBadge(e.geminiCompatibility)}${inputBadge(e)}</td><td><span title="${esc(a.transport || "")}">${esc(transport)}</span><small>${esc(a.finishReason || "—")}</small></td><td><span class="badge ${a.restored ? "go" : ""}">${recovered}</span><small>${a.streamDone === true ? "流已结束" : a.streamDone === false ? "流未完成" : ""}</small></td><td>${esc(tierNames[e.serviceTier] || "Standard")}<small>${esc(e.trafficType || "上游未报告")}</small></td><td class="mono">${(e.latencyMs / 1000).toFixed(2)} s</td></tr>`;
+    return `<tr><td><span class="mono">${esc(new Date(e.at).toLocaleTimeString("zh-CN", { hour12: false }))}</span><small title="${esc(e.requestId)}">${esc(e.requestId.slice(0, 8))}</small></td><td><span class="mono">${esc(e.model || "—")}</span><small>${esc(modeNames[e.mode] || "")}</small></td><td><span class="badge ${success ? "go" : "stop"}">${e.status}</span>${e.code ? `<small class="error-code" title="${esc(errorMessage(e.code))}">${esc(e.code)}</small>` : ""}${integrityBadge(e.responseIntegrity)}${e.upstreamError ? `<small>上游：${esc([e.upstreamError.status, e.upstreamError.reason].filter(Boolean).join(" · "))}</small>` : ""}${compatibilityBadge(e.geminiCompatibility)}${inputBadge(e)}</td><td><span title="${esc(a.transport || "")}">${esc(transport)}</span><small>${esc(a.finishReason || "—")}</small></td><td><span class="badge ${a.restored ? "go" : ""}">${recovered}</span><small>${a.streamDone === true ? "流已结束" : a.streamDone === false ? "流未完成" : ""}</small></td><td>${esc(tierNames[e.serviceTier] || "Standard")}<small>${esc(e.trafficType || "上游未报告")}</small></td>${usageCell(e)}<td class="mono">${(e.latencyMs / 1000).toFixed(2)} s</td></tr>`;
   }).join("") + "</tbody></table></div>";
 }
 // Rebuilding a table resets its horizontal scroll and drops a text selection: skip unchanged
@@ -456,6 +489,25 @@ async function saveConfiguration() {
   const result = await api("/api/config", { settings: draft(), revision: state.config.revision });
   state.config = result; fillConfig(); await refresh(); toast("配置已保存并应用，网关正在运行。");
   setError("form-error", ""); setError("models-error", ""); setError("global-error", "");
+  void checkUpstreamNames();
+}
+// After a save, compare a custom upstream's saved model names with its own model list. It only
+// lists models, so it costs nothing; a mismatch is a warning, since some lists are incomplete.
+async function checkUpstreamNames() {
+  setError("models-name-warning", "");
+  const names = [...new Set(state.config.settings.models.map(m => m.upstreamModel))];
+  if (state.config.settings.authMode !== "custom" || !names.length) return;
+  let listed;
+  try { listed = (await api("/api/models/discover", { settings: {} })).ids; }
+  catch { return setError("models-name-warning", "已保存，但读不到上游的模型列表，没能核对上游模型名。请自行确认这些名字和上游一致。"); }
+  const key = name => /gemini-[a-z0-9][a-z0-9._-]*/i.exec(name)?.[0].toLowerCase();
+  const missing = names.filter(name => !listed.includes(name)).map(name => {
+    const similar = listed.filter(id => key(id) && key(id) === key(name)).slice(0, 3);
+    return name + (similar.length ? `（列表里有：${similar.join("、")}）` : "");
+  });
+  if (!missing.length) return;
+  setError("models-name-warning", `已保存。以下上游模型名不在上游的模型列表里，请求时可能找不到模型：${missing.join("；")}。可以在下方改成列表里的名字；如果上游的列表本来就不全，可以忽略。`);
+  toast(`已保存。有 ${missing.length} 个上游模型名不在上游的模型列表里，详见“模型与版本”。`);
 }
 async function discardConfiguration() {
   state.config = await api("/api/config"); fillConfig(); setError("form-error", ""); setError("models-error", ""); toast("已重新加载保存的配置。");
@@ -552,7 +604,7 @@ $("probe-button").addEventListener("click", async () => {
       // Google's status, reason and redacted message; shown only through textContent or esc().
       const google = body.error?.upstreamError;
       const detail = google ? [google.status, google.reason, google.message].filter(v => typeof v === "string" && v).join(" · ") : "";
-      throw new Error(`HTTP ${response.status} · ` + errorMessage(body.error?.message || body.error?.code) + (detail ? " Google：" + detail : ""));
+      throw new Error(`HTTP ${response.status} · ` + errorMessage(body.error?.message || body.error?.code) + (detail ? " 上游：" + detail : ""));
     }
     requestId = response.headers.get("x-request-id");
     const transport = response.headers.get("x-anti-truncation-transport");

@@ -9,10 +9,22 @@ export function normalizeUpstreamModel(value) {
   return "google/" + id;
 }
 
+// Relays name models in their own ways, so a custom upstream gets the name exactly as written.
+// It only travels in the JSON body, never in a URL.
+export function customUpstreamModel(value) {
+  const name = typeof value === "string" ? value.trim() : "";
+  if (!name || name.length > 200 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error("Invalid custom upstream model name");
+  return name;
+}
+
+// The Gemini model a free-form name refers to, for model-specific handling only; "" when none.
+export const geminiModelKey = name => /gemini-[a-z0-9][a-z0-9._-]*/i.exec(name)?.[0].toLowerCase() ?? "";
+
 // Missing profiles are legacy settings, not an empty model list. Keep the old
 // public ID and its selected behavior when upgrading an existing installation.
-export function modelProfiles(value, legacyEnabled = true) {
-  if (value === undefined || value === null) return [{ id: MODEL_ID, upstreamModel: UPSTREAM_MODEL, mode: legacyEnabled ? "streaming" : "normal" }];
+export function modelProfiles(value, legacyEnabled = true, { custom = false } = {}) {
+  if (value === undefined || value === null) return [{ id: MODEL_ID, upstreamModel: custom ? UPSTREAM_MODEL.replace(/^google\//, "") : UPSTREAM_MODEL,
+    mode: legacyEnabled ? "streaming" : "normal" }];
   if (!Array.isArray(value) || value.length > 100) throw new Error("Model list must contain at most 100 entries");
   const ids = new Set();
   return value.map(row => {
@@ -22,7 +34,7 @@ export function modelProfiles(value, legacyEnabled = true) {
     if (ids.has(row.id)) throw new Error("Model IDs must be unique");
     ids.add(row.id);
     if (!MODEL_MODES.includes(row.mode)) throw new Error("Invalid model mode");
-    return { id: row.id, upstreamModel: normalizeUpstreamModel(row.upstreamModel), mode: row.mode,
+    return { id: row.id, upstreamModel: custom ? customUpstreamModel(row.upstreamModel) : normalizeUpstreamModel(row.upstreamModel), mode: row.mode,
       ...(row.enabled !== undefined ? { enabled: row.enabled } : {}) };
   });
 }
