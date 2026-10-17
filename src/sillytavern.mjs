@@ -46,6 +46,11 @@ export function prepareSillyTavernRequest(request, adapters) {
   }
   const useSystemPrompt = Boolean(body.use_sysprompt);
   const prompt = adapters.convertGooglePrompt(prepared.payload.messages, body.model, useSystemPrompt, adapters.getPromptNames(request));
+  // ST's converter merges the closing instruction into the tool-result turn, which Vertex rejects
+  // ("Requests ending with a model turn are not supported"); give what follows the results its own turn.
+  const last = prompt.contents.at(-1);
+  const results = last?.parts.findLastIndex(part => part.functionResponse) ?? -1;
+  if (results >= 0 && results < last.parts.length - 1) prompt.contents.push({ role: last.role, parts: last.parts.splice(results + 1) });
   const native = nativeRequestBody({ ...prepared.payload, messages: [] });
   native.contents = prompt.contents;
   if (useSystemPrompt && prompt.system_instruction?.parts?.length) native.systemInstruction = prompt.system_instruction;

@@ -2,6 +2,13 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
+## Standalone gateway 0.9.1 and SillyTavern integration 0.5.1 — tool results on native routes
+
+Tags `gateway-v0.9.1` (Docker image `0.9.1`) and `sillytavern-v0.5.1` (one-step package) on the same commit. Replaces 0.9.0/0.5.0 for anyone using tools.
+
+- Fix: after a tool ran, the next request failed with HTTP 400 on native routes (the SillyTavern plugin, Express and Flex). The anti-truncation instruction shared a turn with the function responses, which Gemini 3.7 rejects ("Requests ending with a model turn are not supported"). User text after function responses now starts its own turn, both in the gateway's native translation and after Tavern's prompt conversion in the plugin. The compatible endpoint (Standard and full-mode Priority) was not affected.
+- Found by live testing of 0.9.0/0.5.0: the plugin returned the real call with its signature, and the tool-result request then failed. With the fix, live Gemini 3.7 Flash requests through the plugin (Standard) and through the gateway's Flex route completed the call and the tool-result round trip in non-streaming and streaming modes, with restored text and a normal stop; so did Gemini 4 Argon through the plugin. 217 local tests and 115 release-file checks passed.
+
 ## Standalone gateway 0.9.0 and SillyTavern integration 0.5.0 — client tools under anti-truncation
 
 Tags `gateway-v0.9.0` (Docker image `0.9.0`) and `sillytavern-v0.5.0` (one-step package) on the same commit. Update both Tavern halves together; an older server plugin keeps tool requests on Tavern's route.

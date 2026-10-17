@@ -117,3 +117,14 @@ test("native requests map image detail, keep late instructions in place and reje
   assert.deepEqual(body.contents, [{ role: "user", parts: [{ text: "u1" }] }, { role: "model", parts: [{ text: "a1" }] },
     { role: "user", parts: [{ text: "POST-HISTORY" }, { text: "u2" }] }]);
 });
+
+test("user text after function responses starts its own native turn", () => {
+  const call = id => ({ id, type: "function", function: { name: "lookup", arguments: '{"q":"x"}' } });
+  const body = nativeRequestBody({ model: "google/gemini-3.7-flash", messages: [{ role: "user", content: "ask" },
+    { role: "assistant", content: null, tool_calls: [call("vtx.sig-a"), call("call-b")] },
+    { role: "tool", tool_call_id: "vtx.sig-a", content: '{"v":1}' }, { role: "tool", tool_call_id: "call-b", content: "two" },
+    { role: "user", content: "Transport format for this reply" }] });
+  // Gemini 3.7 rejects a final turn that mixes function responses and text.
+  assert.deepEqual(body.contents.map(content => content.role + ":" + content.parts.map(part => Object.keys(part).join("+")).join(",")),
+    ["user:text", "model:functionCall+thoughtSignature,functionCall", "user:functionResponse,functionResponse", "user:text"]);
+});

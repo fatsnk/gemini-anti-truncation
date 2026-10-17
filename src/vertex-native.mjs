@@ -198,7 +198,10 @@ function buildNativeBody(payload) {
           : contentParts(message.content);
     if (parts.length === 0) continue;
     const previous = contents.at(-1);
-    if (previous?.role === role) previous.parts.push(...parts);
+    // Text sharing a turn with function responses is rejected (Gemini 3.7: "Requests ending
+    // with a model turn are not supported"), so later user text starts its own turn.
+    const afterResults = message.role !== "tool" && previous?.parts.some(part => part.functionResponse);
+    if (previous?.role === role && !afterResults) previous.parts.push(...parts);
     else contents.push({ role, parts });
   }
   if (contents.length === 0) contents.push({ role: "user", parts: [{ text: " " }] });

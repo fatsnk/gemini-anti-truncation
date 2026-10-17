@@ -2,14 +2,14 @@
 
 [中文](DOCKER.md) | English
 
-The Docker image runs the standalone web console and OpenAI-compatible gateway. Connect Tavern through its custom API; this image does not install a Tavern plugin. The public image is `ghcr.io/ken050210/vertex-streaming-anti-truncation`, with `latest`, `0.9.0` and commit tags for `linux/amd64` and `linux/arm64`. Use Docker Engine / Docker Desktop (Linux containers) and Compose v2 or later.
+The Docker image runs the standalone web console and OpenAI-compatible gateway. Connect Tavern through its custom API; this image does not install a Tavern plugin. The public image is `ghcr.io/ken050210/vertex-streaming-anti-truncation`, with `latest`, `0.9.1` and commit tags for `linux/amd64` and `linux/arm64`. Use Docker Engine / Docker Desktop (Linux containers) and Compose v2 or later.
 
 ## Start
 
 ```sh
 mkdir vertex-gateway
 cd vertex-gateway
-curl -fL https://github.com/ken050210/vertex-streaming-anti-truncation/releases/download/gateway-v0.9.0/compose.yaml -o compose.yaml
+curl -fL https://github.com/ken050210/vertex-streaming-anti-truncation/releases/download/gateway-v0.9.1/compose.yaml -o compose.yaml
 docker compose pull
 docker compose up -d
 docker compose logs vertex-gateway
@@ -17,13 +17,13 @@ docker compose logs vertex-gateway
 
 Open the first-time setup link in the logs, including `#setup=...`. The console defaults to `http://127.0.0.1:4780/`. Enter Google credentials, models and a random gateway key, then save. The API starts at `http://127.0.0.1:4781/v1`. Sign in with the saved gateway key on later visits. Keep bootstrap links private.
 
-No registry login, source checkout, host Node.js or `.env` is needed. You can also download the Compose file manually from the [release](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/gateway-v0.9.0). Compose does not automatically pass host Google credentials into the container. Startup, saving and health checks never invoke a model; the console's manual connection test uses your Google billing account.
+No registry login, source checkout, host Node.js or `.env` is needed. You can also download the Compose file manually from the [release](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/gateway-v0.9.1). Compose does not automatically pass host Google credentials into the container. Startup, saving and health checks never invoke a model; the console's manual connection test uses your Google billing account.
 
 The container listens on `0.0.0.0`; Compose publishes both ports only on the host's loopback address by default. Native `npm start` still defaults to `127.0.0.1`. See [Docker port publishing](https://docs.docker.com/engine/network/port-publishing/).
 
 ## Ports and access addresses
 
-Download `.env.docker.example` from the release, copy it to `.env.docker`, edit it and use `docker compose --env-file .env.docker ...` for every Compose command. Set `IMAGE_TAG=0.9.0` to pin the version instead of using `latest`. For example:
+Download `.env.docker.example` from the release, copy it to `.env.docker`, edit it and use `docker compose --env-file .env.docker ...` for every Compose command. Set `IMAGE_TAG=0.9.1` to pin the version instead of using `latest`. For example:
 
 ```dotenv
 DOCKER_BIND_IP=127.0.0.1

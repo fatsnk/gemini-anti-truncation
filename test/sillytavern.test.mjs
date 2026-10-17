@@ -732,3 +732,14 @@ test("the extension accepts any server plugin from the compatibility floor up, n
     assert.equal(Math.sign(compareVersions(a, b)), sign, `${a} vs ${b}`);
   }
 });
+
+test("the closing instruction leaves the tool-result turn that ST's converter merged it into", () => {
+  // ST merges consecutive user-role messages, so the tool result and the instruction share a turn.
+  const merging = { ...adapters, convertGooglePrompt: messages => ({ system_instruction: { parts: [] }, contents: [
+    { role: "user", parts: [{ text: "查一下" }] }, { role: "model", parts: [{ functionCall: { name: "lookup", args: { query: "天气" } }, thoughtSignature: "sig-old" }] },
+    { role: "user", parts: [{ functionResponse: { name: "lookup", response: { name: "lookup", content: "晴" } } }, { text: messages.at(-1).content }] }] }) };
+  const prepared = prepareSillyTavernRequest(request({ messages: [...body.messages, ...toolHistory], tools: [lookupTool] }), merging);
+  assert.deepEqual(prepared.body.contents.slice(-2).map(content => content.parts.map(part => Object.keys(part)[0])), [["functionResponse"], ["text"]]);
+  assert.match(prepared.body.contents.at(-1).parts[0].text, /Transport format/);
+  assert.deepEqual(prepared.body.contents.map(content => content.role), ["user", "model", "user", "user"]);
+});

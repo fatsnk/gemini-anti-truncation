@@ -2,6 +2,13 @@
 
 中文 | [English](CHANGELOG.md)
 
+## 独立网关 0.9.1 与 SillyTavern 集成 0.5.1 — 原生路线上的工具结果
+
+标签 `gateway-v0.9.1`（Docker 镜像 `0.9.1`）与 `sillytavern-v0.5.1`（一键安装包）位于同一提交。用到工具的请直接用本版替换 0.9.0/0.5.0。
+
+- 修复：在原生路线上（SillyTavern 插件、Express、Flex），工具执行后的下一次请求会以 HTTP 400 失败。原因是抗截断说明和工具结果被放在了同一轮里，Gemini 3.7 会拒绝（“Requests ending with a model turn are not supported”）。现在工具结果之后的用户文字另起一轮：网关的原生翻译和插件在酒馆转换提示词之后都这样处理。兼容接口（Standard 与完整模式 Priority）不受影响。
+- 由 0.9.0/0.5.0 的实测发现：插件交回了带签名的真实调用，随后回传工具结果的请求失败。修复后，经插件（Standard）和网关 Flex 路线发出的 Gemini 3.7 Flash 真实请求，在非流式和流式下都完成了工具调用和结果回传，正文正常还原、正常结束；Gemini 4 Argon 经插件也同样通过。本地 217 项测试和 115 个发布文件检查通过。
+
 ## 独立网关 0.9.0 与 SillyTavern 集成 0.5.0 — 客户端工具与抗截断共用
 
 标签 `gateway-v0.9.0`（Docker 镜像 `0.9.0`）与 `sillytavern-v0.5.0`（一键安装包）位于同一提交。酒馆插件请前后端一起更新；服务端插件较旧时，带工具的请求走酒馆原流程。
