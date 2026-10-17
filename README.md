@@ -33,7 +33,7 @@ https://raw.githubusercontent.com/ken050210/vertex-streaming-anti-truncation/mai
 
 也提供 **SillyTavern 原生 Vertex 面板集成**：UI 扩展与服务端插件配套安装后，直接在 Google Vertex AI 连接面板选择关闭、非流式或流式抗截断，复用酒馆凭据，无需另开网关进程。默认关闭；[安装与验证说明](docs/SILLYTAVERN.md)。
 
-SillyTavern 需要 1.19.x，有两种装法，只选一种：想在酒馆里跟随仓库更新，用 Git 装法；想一次装好两半，用一键安装包。Git 装法：在酒馆“安装扩展”的 Git URL 输入框填入 `https://github.com/ken050210/vertex-streaming-anti-truncation`，分支留空。**首次还需在酒馆根目录执行** `node plugins.js install https://github.com/ken050210/vertex-streaming-anti-truncation` 安装配套服务端插件，再在 `plugins/vertex-streaming-anti-truncation` 目录运行 `npm ci --ignore-scripts` 安装图片输入所需的渲染依赖，启用 `enableServerPlugins` 并重启酒馆。仅安装前端无法完成抗截断传输；已有手动安装请先阅读[迁移说明](docs/SILLYTAVERN.md#更新与已有手动安装)，避免重复加载。也可以从 [Release `sillytavern-v0.5.1`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.5.1) 下载[一键安装包](docs/SILLYTAVERN.md#一键安装包)，解压后运行其中的安装程序，一次装好前后端并开启服务端插件，不需要 Git。压缩包只在发版时更新；发版之后 `main` 上的新改动，可以用四条命令[从源码生成安装包并安装](docs/AGENT-INSTALL.md#sillytavern)。
+SillyTavern 需要 1.19.x，有两种装法，只选一种：想在酒馆里跟随仓库更新，用 Git 装法；想一次装好两半，用一键安装包。Git 装法：在酒馆“安装扩展”的 Git URL 输入框填入 `https://github.com/ken050210/vertex-streaming-anti-truncation`，分支留空。**首次还需在酒馆根目录执行** `node plugins.js install https://github.com/ken050210/vertex-streaming-anti-truncation` 安装配套服务端插件，再在 `plugins/vertex-streaming-anti-truncation` 目录运行 `npm ci --ignore-scripts` 安装图片输入所需的渲染依赖，启用 `enableServerPlugins` 并重启酒馆。仅安装前端无法完成抗截断传输；已有手动安装请先阅读[迁移说明](docs/SILLYTAVERN.md#更新与已有手动安装)，避免重复加载。也可以从 [Release `sillytavern-v0.5.2`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.5.2) 下载[一键安装包](docs/SILLYTAVERN.md#一键安装包)，解压后运行其中的安装程序，一次装好前后端并开启服务端插件，不需要 Git。压缩包只在发版时更新；发版之后 `main` 上的新改动，可以用四条命令[从源码生成安装包并安装](docs/AGENT-INSTALL.md#sillytavern)。
 
 **TauriTavern（TT 酒馆）适配版**：同一个 UI 扩展也适配了 [TauriTavern](https://github.com/Darkatse/TauriTavern)。它把酒馆的 Node.js 后台换成了 Rust，不能运行服务端插件，所以在 TauriTavern 里只装 UI 扩展：在“安装扩展”中填入上面的 Git URL、分支留空即可，不需要 Node.js、`plugins.js`、`npm ci` 和 `enableServerPlugins`。扩展检测到 TauriTavern 后自己完成抗截断的请求改写和回复还原，凭据与提示词转换仍由 TauriTavern 处理。支持非流式／流式抗截断、Unicode 转码和“继续”适配，不支持图片输入。随 SillyTavern 集成 0.4.0 发布；[安装、与插件版的差别和验收范围](docs/SILLYTAVERN.md#tauritavern)。
 
@@ -107,7 +107,7 @@ npm start
 控制台支持深浅主题和窄屏布局：
 
 - **连接配置**：填写项目 ID，粘贴或导入完整服务账号 JSON；也可切换到 Express API Key、短期 OAuth Token 或[自定义上游](#自定义上游)。服务账号 JSON 中的项目 ID 可自动填入，也可覆盖为另一个有权限访问的目标项目。Express API Key、访问令牌和上游 API Key 只能含可见 ASCII 字符，混入中文引号、全角字符时保存会被拒绝。
-- **服务等级**：显式选择 Standard、Flex 或 Priority。Express、Flex 和 Priority 使用 `global`。Express 的项目 ID 可选填，仅作备注，其请求端点不包含项目和地区。
+- **服务等级**：显式选择 Standard、Flex 或 Priority。Express、Flex 和 Priority 的地区配置使用 `global`。Express 填写 API Key 所属的项目 ID 或项目编号后，请求地址会明确包含 `projects/{项目}/locations/global`；留空保留原有无项目端点，由 Express 决定实际地区。Gemini 4 Argon 必须填写项目，否则请求会在本地提示 `express_project_required`。
 - **本地网关**：设置 API 端口、超时和随机网关密钥（至少 16 个可见 ASCII 字符，不含空格）。复制生成的网关密钥后再保存，后续凭据不回显；空白凭据字段保留已有值。保存过配置后，若其他鉴权方式仍有已保存的凭据，连接配置会出现“保存时删除其他鉴权方式已保存的凭据”勾选项；勾选后保存即从 settings.json 删除这些凭据，切换鉴权方式会自动取消勾选。更换网关密钥会让其他已登录的控制台会话退出，其他保存不影响登录。
 - **模型与版本**：拉取并搜索 Google 模型目录，批量添加所需版本；也可手动填写上游 ID。分别编辑客户端名称、上游模型与传输模式，最多保存 100 个版本。
 - **总览与日志**：启动/停止网关，复制客户端 URL，检查请求状态、正文还原、结束原因、请求档位/实际上游档位，以及 token 用量和[估算费用](#用量与费用估算)。记录仅保留最近 200 条。

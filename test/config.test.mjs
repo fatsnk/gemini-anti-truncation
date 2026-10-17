@@ -52,10 +52,10 @@ test("service-account configuration accepts only Google's token exchange endpoin
   await assert.rejects(loadConfig(input), /not valid JSON/);
 });
 
-test("Express API keys use a projectless global endpoint and explicit service-tier headers", async () => {
-  for (const serviceTier of ["standard", "flex", "priority"]) {
-    const config = await loadConfig({ GATEWAY_API_KEY: env.GATEWAY_API_KEY, VERTEX_API_KEY: "synthetic-express-key", VERTEX_SERVICE_TIER: serviceTier });
-    assert.equal(config.baseUrl, "https://aiplatform.googleapis.com/v1");
+test("Express uses an explicit global project when supplied and preserves projectless keys and tier headers", async () => {
+  for (const serviceTier of ["standard", "flex", "priority"]) for (const projectId of ["", "example-project", "123456789012"]) {
+    const config = await loadConfig({ GATEWAY_API_KEY: env.GATEWAY_API_KEY, VERTEX_API_KEY: "synthetic-express-key", VERTEX_SERVICE_TIER: serviceTier, VERTEX_PROJECT_ID: projectId });
+    assert.equal(config.baseUrl, "https://aiplatform.googleapis.com/v1" + (projectId ? `/projects/${projectId}/locations/global` : ""));
     assert.equal(config.authMode, "express");
     assert.equal(config.nativeOnly, true);
     assert.equal(await config.accessToken(), "synthetic-express-key");
@@ -63,7 +63,7 @@ test("Express API keys use a projectless global endpoint and explicit service-ti
       "x-vertex-ai-llm-shared-request-type": serviceTier, "x-vertex-ai-llm-request-type": "shared",
     });
   }
-  for (const override of [{ VERTEX_ACCESS_TOKEN: "also-set" }, { VERTEX_LOCATION: "us-central1" }, { VERTEX_SERVICE_TIER: "automatic" }]) {
+  for (const override of [{ VERTEX_ACCESS_TOKEN: "also-set" }, { VERTEX_LOCATION: "us-central1" }, { VERTEX_SERVICE_TIER: "automatic" }, { VERTEX_PROJECT_ID: "example/../../elsewhere" }]) {
     await assert.rejects(loadConfig({ GATEWAY_API_KEY: env.GATEWAY_API_KEY, VERTEX_API_KEY: "synthetic-express-key", ...override }));
   }
 });

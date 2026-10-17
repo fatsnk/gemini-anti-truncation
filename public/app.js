@@ -38,6 +38,7 @@ function errorMessage(message) {
     "Gateway and console must use different ports": "API 端口不能与控制台端口相同。",
     "Requests are still running; wait before stopping the gateway": "仍有请求进行中，请等回复完成后再停止网关。",
     "Express, Flex and Priority require the global location": "Express、Flex 和 Priority 需要使用 global 地区。",
+    "express_project_required": "快速模式使用 Gemini 4 Argon 需要填写 API Key 所属的项目 ID。请在连接配置中补填并保存，以指定 global 地区。",
     "Too many attempts; try again in a minute": "尝试次数过多，请在一分钟后重试。",
     "unsupported_native_schema": "Schema 含无法保留的约束，请检查错误中的参数路径。",
     "schema_validation_failed": "模型输出没有符合所需 Schema，请检查输出约束或重试。",
@@ -247,7 +248,7 @@ function updateDraft(dirty = true) {
   $("location").disabled = forcedGlobal || custom;
   $("project-id").required = !["express", "custom"].includes(d.authMode);
   $("project-optional").hidden = d.authMode !== "express";
-  $("project-help").textContent = d.authMode === "express" ? "快速模式由 API Key 确定项目；这里可选填备注。" : "填写目标 Google Cloud 项目 ID，可与服务账号所属项目不同。";
+  $("project-help").textContent = d.authMode === "express" ? "填写 API Key 所属的项目 ID 或项目编号，以明确使用 global 地区。Gemini 4 Argon 必填。" : "填写目标 Google Cloud 项目 ID，可与服务账号所属项目不同。";
   $("credential-service").hidden = d.authMode !== "service-account";
   $("credential-express").hidden = d.authMode !== "express";
   $("credential-token").hidden = d.authMode !== "access-token";
@@ -257,7 +258,7 @@ function updateDraft(dirty = true) {
   $("clear-other-label").textContent = "保存时删除其他鉴权方式已保存的凭据：" + others.map(([, label]) => label).join("、");
   $("preview-auth").textContent = authNames[d.authMode]; $("preview-tier").textContent = custom ? "不适用" : tierNames[d.serviceTier];
   $("preview-location-label").textContent = custom ? "上游" : "地区";
-  $("preview-location").textContent = (custom ? upstreamHost(d.customBaseUrl) : $("location").value) || "—"; $("preview-port").textContent = d.port || "—";
+  $("preview-location").textContent = (custom ? upstreamHost(d.customBaseUrl) : d.authMode === "express" && !d.projectId ? "由 Express 决定" : $("location").value) || "—"; $("preview-port").textContent = d.port || "—";
   $("tier-help").textContent = d.serviceTier === "standard" ? "使用标准档位，不自动升级服务等级。" : d.serviceTier === "flex"
     ? "Flex 使用原生接口，响应等待可能更长。账户和模型须支持该档位；失败时不会自动切换为 Standard。"
     : "Priority 使用优先按量服务，按对应档位计费。实际是否使用 Priority 请查看请求日志中的上游档位。";
@@ -322,9 +323,9 @@ function renderStatus() {
   $("listen-scope").textContent = allInterfaces ? "容器 / 网络访问" : "仅限本机 · 127.0.0.1";
   $("port-help").textContent = allInterfaces ? "Docker 默认映射到容器 4781；修改此端口后需同步修改容器端口映射。" : "仅监听 127.0.0.1，与控制台端口分开。";
   $("overview-auth").textContent = current ? authNames[current.authMode] : "未启动";
-  $("overview-project").textContent = custom ? "不适用" : shown.authMode === "express" ? "Express · 由 API Key 确定" : shown.projectId || "—";
+  $("overview-project").textContent = custom ? "不适用" : shown.projectId || (shown.authMode === "express" ? "Express · 由 API Key 确定" : "—");
   $("overview-location-label").textContent = custom ? "上游" : "地区";
-  $("overview-location").textContent = custom ? upstreamHost(shown.customBaseUrl) : shown.location;
+  $("overview-location").textContent = custom ? upstreamHost(shown.customBaseUrl) : shown.authMode === "express" && !shown.projectId ? "由 Express 决定" : shown.location;
   const models = s.running ? s.models : c.models;
   const hidden = new Set((s.modelAvailability || []).filter(m => m.hidden).map(m => m.id));
   $("overview-anti").textContent = models.length + " 个独立版本" + (s.running ? " · " + hidden.size + " 个已隐藏" : "");

@@ -44,7 +44,7 @@ test("Express tiers and full-mode Flex reach the correct native URLs with correc
     else assert.equal(JSON.parse(body).router_anti_truncation.restored, true);
     const request = f.requests[0];
     if (authMode === "express") {
-      assert.match(request.url, /^https:\/\/aiplatform.googleapis.com\/v1\/publishers/);
+      assert.match(request.url, /^https:\/\/aiplatform.googleapis.com\/v1\/projects\/example-project\/locations\/global\/publishers/);
       assert.equal(request.headers["x-goog-api-key"], "synthetic-express-key");
       assert.equal(request.headers.authorization, undefined);
     } else {

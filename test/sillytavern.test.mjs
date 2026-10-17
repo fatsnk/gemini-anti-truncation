@@ -299,6 +299,11 @@ test("SillyTavern credentials stay per-user and selected secret; destinations ca
   assert.deepEqual(reads, [[input.user.directories, "test-key", "selected"]]);
   assert.equal(config.baseUrl, "https://aiplatform.googleapis.com/v1");
   assert.equal(config.tierHeaders["x-vertex-ai-llm-shared-request-type"], "flex");
+  for (const model of ["gemini-4-argon", "gemini-4-argon@001"]) {
+    assert.throws(() => connectionForRequest(request({ model }), adapters), { status: 400, code: "express_project_required" });
+    const scoped = connectionForRequest(request({ model, vertexai_express_project_id: "example-project" }), adapters);
+    assert.equal(scoped.baseUrl, "https://aiplatform.googleapis.com/v1/projects/example-project/locations/global");
+  }
   assert.throws(() => connectionForRequest(request({ vertexai_region: "global/evil" }), adapters));
   assert.throws(() => connectionForRequest(request({ reverse_proxy: "http://example.invalid" }), adapters));
   assert.throws(() => prepareSillyTavernRequest(request({ model: "../../private" }), adapters));
@@ -402,14 +407,17 @@ test("a native parsing failure before output returns a JSON HTTP error", async t
   assert.equal((await response.json()).error.code, "anti_truncation_native_invalid_sse");
 });
 
-test("server handler uses one mock upstream request and returns readable native SSE", async t => {
-  let calls = 0;
+test("server handler routes Express Argon through global once and rejects missing projects before inference", async t => {
+  let calls = 0, expectedUrl;
   const handler = createGenerateHandler(adapters, { fetchImpl: async (url, init) => {
     calls++;
-    assert.equal(new URL(url).host, "aiplatform.googleapis.com");
+    assert.equal(url, expectedUrl);
     assert.equal(init.headers["x-vertex-ai-llm-shared-request-type"], "flex");
+    assert.equal(init.headers["x-goog-api-key"], "fixture-api-key");
     const sent = JSON.parse(init.body);
-    return new Response(completeWire(sent.tools[0].functionDeclarations[0].name));
+    const name = sent.tools[0].functionDeclarations[0].name;
+    return url.includes(":streamGenerateContent") ? new Response(completeWire(name))
+      : Response.json({ candidates: [{ content: { parts: [{ functionCall: { name, args: { content: "正文😀" } } }] }, finishReason: "STOP" }] });
   } });
   const server = http.createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
@@ -420,12 +428,30 @@ test("server handler uses one mock upstream request and returns readable native 
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   t.after(() => { server.closeAllConnections(); server.close(); });
-  const response = await fetch(`http://127.0.0.1:${server.address().port}`, { method: "POST", body: JSON.stringify(body) });
+  const post = extra => fetch(`http://127.0.0.1:${server.address().port}`, { method: "POST", body: JSON.stringify({ ...body, ...extra }) });
+  const missing = await post({ model: "gemini-4-argon" });
+  assert.equal(missing.status, 400);
+  const error = (await missing.json()).error;
+  assert.equal(error.code, "express_project_required");
+  assert.match(error.message, /项目 ID/);
+  assert.equal(calls, 0);
+  expectedUrl = "https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-3-flash-preview:streamGenerateContent?alt=sse";
+  const response = await post({});
   assert.equal(response.status, 200);
   // ST's compression() would otherwise buffer the whole stream.
   assert.match(response.headers.get("cache-control"), /no-transform/);
   assert.equal(contents(await response.text()), "正文😀");
   assert.equal(calls, 1);
+  for (const mode of ["buffered", "streaming"]) for (const stream of [false, true]) {
+    const upstreamStream = mode === "streaming" && stream;
+    expectedUrl = "https://aiplatform.googleapis.com/v1/projects/example-project/locations/global/publishers/google/models/gemini-4-argon:"
+      + (upstreamStream ? "streamGenerateContent?alt=sse" : "generateContent");
+    const result = await post({ model: "gemini-4-argon", vertexai_express_project_id: "example-project", vertex_anti_truncation: mode, stream });
+    assert.equal(result.status, 200);
+    const text = await result.text();
+    assert.equal(stream ? contents(text) : JSON.parse(text).choices[0].message.content, "正文😀");
+  }
+  assert.equal(calls, 5, "one upstream call per successful request, with no duplicate project path");
 });
 
 test("Unicode transforms before off/tools/schema bypass and retains Request metadata", async () => {

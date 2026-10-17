@@ -13,7 +13,7 @@ import { translateNativeCompletion, wrapNativeStream } from "./vertex-protocol.m
 import { geminiModelKey, modelProfiles } from "./model-profiles.mjs";
 import { completionStream, aliasStream } from "./completion-stream.mjs";
 import { convertGeminiPrefill, fetchWithGeminiRecovery, compatibilityLogFields } from "./gemini-compat.mjs";
-import { prepareGemini4Request, validateGemini4Output } from "./gemini4.mjs";
+import { prepareGemini4Request, validateGemini4Connection, validateGemini4Output } from "./gemini4.mjs";
 import { documentedUnsupported, dropParams } from "./unsupported-params.mjs";
 import { googleErrorDetail, trafficType, upstreamErrorLogFields } from "./wire.mjs";
 import { waitWithSignal } from "./abort.mjs";
@@ -179,6 +179,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       route = models.find(model => model.id === payload.model);
       if (!route) throw new Problem(400, "unsupported_model");
       if (route.enabled === false) throw new Problem(503, "model_disabled");
+      validateGemini4Connection(config, route.upstreamModel);
       const custom = config.authMode === "custom";
       // A custom upstream gets its own model name verbatim. Gemini-specific handling follows the
       // model that name refers to, and is skipped when none is recognizable.

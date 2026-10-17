@@ -103,7 +103,9 @@ export function buildConnectionConfig(settings, { requireAscii = true } = {}) {
     accessToken = async () => value;
   }
   const host = s.location === "global" ? "aiplatform.googleapis.com" : `${s.location}-aiplatform.googleapis.com`;
-  const baseUrl = s.authMode === "express" ? "https://aiplatform.googleapis.com/v1"
+  // The projectless Express endpoint does not explicitly select locations/global.
+  // Honor a supplied project so global-only models can use the scoped native endpoint.
+  const baseUrl = s.authMode === "express" ? `https://aiplatform.googleapis.com/v1${s.projectId ? `/projects/${s.projectId}/locations/${s.location}` : ""}`
     : `https://${host}/v1/projects/${s.projectId}/locations/${s.location}/endpoints/openapi`;
   const tierHeaders = s.serviceTier === "standard" ? {} : {
     "x-vertex-ai-llm-shared-request-type": s.serviceTier,

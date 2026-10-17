@@ -2,6 +2,15 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
+## Standalone gateway 0.10.1 and SillyTavern integration 0.5.2 — Express global routing
+
+Tags `gateway-v0.10.1` (Docker image `0.10.1`) and `sillytavern-v0.5.2` (one-step package) share this fix.
+
+- Express now uses a supplied project ID or project number in `projects/{project}/locations/global`. Previously the standalone gateway treated it as a note and always used the projectless endpoint, which could resolve Argon in `us-central1` despite the console showing `global`.
+- Gemini 4 Argon requests without an Express project fail locally with `express_project_required` and guidance to fill it in. Existing configurations remain readable and editable; earlier models retain the projectless endpoint when no project is supplied. The console shows that Express chooses the location in that case.
+- The Tavern plugin uses the shared URL builder instead of appending the project path again. Both response modes and both anti-truncation modes retain one upstream request per successful call.
+- Validation: 225 offline tests passed. The built Docker image passed 6 focused routing tests and isolated Compose smoke checks. The packaged Tavern code passed 30 tests and all 50 package-file hashes matched. No real provider inference was performed for this fix.
+
 ## Standalone gateway 0.10.0 — custom upstream and cost estimates
 
 Tag `gateway-v0.10.0` (Docker image `0.10.0`). Standalone gateway only; the SillyTavern integration stays at 0.5.1 with unchanged code, and a Git-installed server plugin gains an unused `src/pricing.mjs`.

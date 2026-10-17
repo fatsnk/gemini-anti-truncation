@@ -3,6 +3,7 @@ import { buildConnectionConfig } from "../../src/config.mjs";
 import { prepareImageInput } from "../../src/image-input.mjs";
 import { buildNativeUrl } from "../../src/vertex-native.mjs";
 import { parseServiceAccount } from "../../src/vertex-auth.mjs";
+import { validateGemini4Connection } from "../../src/gemini4.mjs";
 import { upstreamDispatcher } from "../../src/gateway.mjs";
 import { prepareSillyTavernRequest, restoreSillyTavernResponse, requestError } from "../../src/sillytavern.mjs";
 import { sseData } from "../../src/wire.mjs";
@@ -25,8 +26,7 @@ export function connectionForRequest(request, { readSecret, SECRET_KEYS }) {
   }
   // Reuse the gateway's validated official Google destinations and token cache.
   const config = buildConnectionConfig(settings);
-  // Preserve ST's optional Express project scope.
-  if (auth === "express" && settings.projectId) config.baseUrl += `/projects/${settings.projectId}/locations/${settings.location}`;
+  validateGemini4Connection(config, body.model);
   return config;
 }
 
@@ -84,7 +84,8 @@ export function createGenerateHandler(adapters, { fetchImpl = fetch, timeoutMs =
       // Do not echo provider error bodies, URLs, prompts or credential exceptions.
       const code = deadline.aborted ? "vertex_timeout" : error.protocolFailure || error.status ? error.code
         : stage === "image" ? "image_render_failed" : `vertex_${stage}_failed`;
-      const detail = stage === "configuration" ? "检查 Vertex 凭据和地区；Express、Flex、Priority 需要 global。" :
+      const detail = code === "express_project_required" ? "快速模式使用 Gemini 4 Argon 需要填写 API Key 所属的项目 ID，以指定 global 地区。" :
+        stage === "configuration" ? "检查 Vertex 凭据和地区；Express、Flex、Priority 需要 global。" :
         stage === "authentication" ? "Vertex 鉴权失败，请检查已保存的凭据。" : stage === "image" ? "图片输入转换失败，未改用明文发送。" :
         imageMode !== "off" && request.body?.vertex_anti_truncation === "off" ? "Vertex 图片输入请求失败。" : "Vertex 抗截断请求失败。";
       const payload = { error: { code, message: `${detail} (${code}, HTTP ${status})` } };

@@ -434,6 +434,44 @@ test("an occupied console port names the console port and GUI_PORT", async t => 
   await assert.rejects(app.listen(port), { status: 409, message: `Console port ${port} is unavailable (GUI_PORT); another console may already be running` });
 });
 
+test("Express Argon probes require a project and use locations/global after save/apply, with old configurations still readable", async t => {
+  const requests = [];
+  const f = await fixture(t, { fetchImpl: async (url, request) => {
+    requests.push({ url, headers: request.headers });
+    const result = { candidates: [{ content: { parts: [{ text: "probe reply" }] }, finishReason: "STOP" }] };
+    return url.includes(":streamGenerateContent") ? new Response("data: " + JSON.stringify(result) + "\n\n") : Response.json(result);
+  } });
+  const models = [
+    { id: "argon-alias", upstreamModel: "google/gemini-4-argon", mode: "normal" },
+    { id: "earlier-model", upstreamModel: "google/gemini-3.7-flash", mode: "normal" },
+  ];
+  const initial = await f.api("/api/config", { revision: "new", settings: { ...f.settings, projectId: "", models } });
+  assert.equal(initial.status, 200);
+  const saved = await initial.json();
+  assert.equal((await f.store.load()).settings.projectId, "", "legacy Argon configurations remain readable and editable");
+  for (const stream of [false, true]) {
+    const response = await f.api("/api/probe", { confirm: true, model: "argon-alias", stream });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error.code, "express_project_required");
+  }
+  assert.equal(requests.length, 0, "missing project is rejected before any upstream request");
+  const earlier = await f.api("/api/probe", { confirm: true, model: "earlier-model" });
+  assert.equal(earlier.status, 200); await earlier.text();
+  assert.equal(requests[0].url, "https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-3.7-flash:generateContent");
+  const applied = await f.api("/api/config", { revision: saved.revision, settings: { projectId: "example-project" } });
+  assert.equal(applied.status, 200);
+  assert.equal((await applied.json()).status.active.projectId, "example-project");
+  for (const stream of [false, true]) {
+    const response = await f.api("/api/probe", { confirm: true, model: "argon-alias", stream });
+    assert.equal(response.status, 200); assert.match(await response.text(), /probe reply/);
+    const request = requests.at(-1);
+    assert.equal(request.url, "https://aiplatform.googleapis.com/v1/projects/example-project/locations/global/publishers/google/models/gemini-4-argon:" + (stream ? "streamGenerateContent?alt=sse" : "generateContent"));
+    assert.equal(request.headers["x-goog-api-key"], f.settings.apiKey);
+    assert.equal(request.headers.authorization, undefined);
+  }
+  assert.equal(requests.length, 3);
+});
+
 test("console probe allows the gateway its configured timeout and names local connection failures", async t => {
   const f = await fixture(t, { fetchImpl: async (_url, request) => {
     const name = JSON.parse(request.body).tools[0].functionDeclarations[0].name;

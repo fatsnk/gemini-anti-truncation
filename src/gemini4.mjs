@@ -3,6 +3,12 @@
 export const isGemini4Argon = model => /^(?:google\/|publishers\/google\/models\/)?gemini-4-argon(?:@[a-z0-9-]+)?$/i.test(model || "");
 const invalid = (code, message) => Object.assign(new Error(message), { status: 400, code });
 
+export function validateGemini4Connection(config, model) {
+  if (config.authMode === "express" && !config.projectId && isGemini4Argon(model)) {
+    throw invalid("express_project_required", "Enter the API key's Google Cloud project ID to use Gemini 4 Argon with Express at locations/global.");
+  }
+}
+
 export function gemini4ThinkingLevel(effort) {
   if (effort == null || effort === "") return undefined;
   const value = String(effort).toLowerCase();
