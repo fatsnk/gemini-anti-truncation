@@ -4,7 +4,7 @@ import http from "node:http";
 import { once } from "node:events";
 import { prepareSillyTavernRequest, restoreSillyTavernResponse } from "../src/sillytavern.mjs";
 import { createGenerateHandler, connectionForRequest } from "../integrations/sillytavern/server.mjs";
-import { createFetchInterceptor, bypassReason, compareVersions, BODY_LIMIT, GENERATE_PATH, MIN_SERVER_VERSION, PLUGIN_PATH, PLUGIN_VERSION } from "../integrations/sillytavern/shared.js";
+import { createFetchInterceptor, bypassReason, compareVersions, BODY_LIMIT, GENERATE_PATH, MIN_SERVER_VERSION, PLUGIN_FEATURES, PLUGIN_PATH, PLUGIN_VERSION, TOOLS_FEATURE } from "../integrations/sillytavern/shared.js";
 import { sseData } from "../src/wire.mjs";
 import { CONTINUATION_INSTRUCTION } from "../src/anti-truncation.mjs";
 
@@ -28,6 +28,12 @@ const completeWire = (name, text = "正文😀") => nativeCall({ name, args: { c
   candidates: [{ finishReason: "STOP" }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15, trafficType: "ON_DEMAND_FLEX" },
 });
 const events = text => text.split("\n").filter(line => line.startsWith("data:") && !line.includes("[DONE]")).map(line => JSON.parse(line.slice(5)));
+// The shape ST's ToolManager.toFunctionOpenAI() sends.
+const lookupTool = { type: "function", function: { name: "lookup", description: "Look something up.",
+  parameters: { $schema: "http://json-schema.org/draft-04/schema#", type: "object", properties: { query: { type: "string" } }, required: ["query"] } } };
+const toolHistory = [{ role: "user", content: "查一下" },
+  { role: "assistant", content: "", tool_calls: [{ id: "call-1", type: "function", function: { name: "lookup", arguments: '{"query":"天气"}' }, signature: "sig-old" }] },
+  { role: "tool", tool_call_id: "call-1", content: "晴" }];
 const contents = text => events(text).flatMap(event => event.candidates ?? []).flatMap(candidate => candidate.content?.parts ?? [])
   .filter(part => !part.thought).map(part => part.text ?? "").join("");
 
@@ -53,16 +59,22 @@ test("SillyTavern intercept is scoped, preserves CSRF/cancellation, and never re
   assert.equal(calls[0][0], `${PLUGIN_PATH}/generate`);
   assert.strictEqual(calls[0][1].signal, controller.signal);
   assert.strictEqual(calls[0][1].headers, init.headers);
-  for (const patch of [{ tools: [{}] }, { json_schema: { value: {} } }, { enable_web_search: true }, { request_images: true },
-    { messages: [{ role: "tool", content: "result" }] },
-    { messages: [{ role: "assistant", content: [{ type: "tool_calls", tool_calls: [{ function: { name: "lookup", arguments: "{}" } }] }] }] },
-    { messages: [{ role: "user", content: [{ type: "tool_call_id", tool_call_id: "call-1", content: "result" }] }] },
-    { messages: [{ role: "user", tool_call_id: "call-1", content: "result" }] },
+  for (const patch of [{ tools: [{}] }, { tools: [lookupTool], tool_choice: "required" }, { functions: [{ name: "legacy" }] },
+    { tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object", properties: { q: { type: "string", default: "x" } } } } }] },
+    { json_schema: { value: {} } }, { enable_web_search: true }, { request_images: true },
+    { messages: [{ role: "function", name: "legacy", content: "result" }] },
     { n: 2 }, { reverse_proxy: "https://example.invalid" }, { chat_completion_source: "custom" }]) {
     const input = { ...init, body: JSON.stringify({ ...body, ...patch }) };
     await wrapped(GENERATE_PATH, input);
     assert.equal(calls.at(-1)[0], GENERATE_PATH);
     assert.strictEqual(calls.at(-1)[1], input);
+  }
+  // Client tools and tool history (ST's own shapes included) now use the plugin.
+  for (const patch of [{ tools: [lookupTool], tool_choice: "auto" }, { tools: [lookupTool], tool_choice: "none" }, { messages: toolHistory },
+    { messages: [{ role: "assistant", content: [{ type: "tool_calls", tool_calls: [{ function: { name: "lookup", arguments: "{}" } }] }] }] },
+    { messages: [{ role: "user", content: [{ type: "tool_call_id", tool_call_id: "call-1", content: "result" }] }] }]) {
+    await wrapped(GENERATE_PATH, { ...init, body: JSON.stringify({ ...body, ...patch }) });
+    assert.equal(calls.at(-1)[0], `${PLUGIN_PATH}/generate`);
   }
   for (const url of ["https://example.invalid" + GENERATE_PATH, "/api/secrets/write"]) {
     await wrapped(url, init);
@@ -216,16 +228,68 @@ test("developer instructions remain system instructions through ST prompt proces
   assert.deepEqual(input, original);
 });
 
-test("embedded ST tool history is rejected before prompt conversion or transport injection", () => {
-  for (const messages of [
-    [{ role: "assistant", content: [{ type: "tool_calls", tool_calls: [{ function: { name: "lookup", arguments: "{}" } }] }] }],
-    [{ role: "user", content: [{ type: "tool_call_id", tool_call_id: "call-1", content: "result" }] }],
-    [{ role: "user", tool_call_id: "call-1", content: "result" }],
-  ]) {
-    assert.throws(() => prepareSillyTavernRequest(request({ messages }), { ...adapters,
-      convertGooglePrompt() { assert.fail("tool history must bypass conversion"); },
-    }), { code: "unsupported_request_tool_history", status: 400 });
+test("ST tool history reaches ST's converter, and client tools are declared before the transport tool", () => {
+  for (const [mode, stream] of [["streaming", true], ["buffered", true], ["streaming", false]]) {
+    let converted;
+    const input = request({ messages: [...body.messages, ...toolHistory], tools: [lookupTool], tool_choice: "auto", vertex_anti_truncation: mode, stream });
+    const before = structuredClone(input);
+    const prepared = prepareSillyTavernRequest(input, { ...adapters, convertGooglePrompt(messages) { converted = messages; return adapters.convertGooglePrompt(messages); } });
+    assert.deepEqual(input, before);
+    assert.deepEqual(converted.slice(0, -1), [...body.messages, ...toolHistory]);
+    assert.match(converted.at(-1).content, /Call the other tools whenever the task needs them/);
+    const declarations = prepared.body.tools[0].functionDeclarations;
+    assert.deepEqual(declarations[0], { name: "lookup", description: "Look something up.",
+      parametersJsonSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } });
+    assert.deepEqual(declarations.map(declaration => declaration.name), ["lookup", prepared.toolName]);
+    // Real calls arrive whole: argument streaming stays off even in streaming mode.
+    assert.deepEqual(prepared.body.toolConfig, { functionCallingConfig: { mode: "ANY" } });
+    assert.equal(prepared.upstreamStream, mode === "streaming" && stream);
+    assert.equal(prepared.clientTools, true);
   }
+  const none = prepareSillyTavernRequest(request({ tools: [lookupTool], tool_choice: "none" }), adapters);
+  assert.deepEqual(none.body.toolConfig.functionCallingConfig, { mode: "ANY", allowedFunctionNames: [none.toolName] });
+  // History without declared tools keeps the transport call's argument stream.
+  const history = prepareSillyTavernRequest(request({ messages: [...body.messages, ...toolHistory] }), adapters);
+  assert.equal(history.body.toolConfig.functionCallingConfig.streamFunctionCallArguments, true);
+  for (const [extra, code] of [[{ tools: [lookupTool], tool_choice: "required" }, "unsupported_request_tool_choice"],
+    [{ messages: [{ role: "assistant", content: "", function_call: { name: "legacy", arguments: "{}" } }] }, "unsupported_request_tool_history"],
+    [{ tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object", properties: { q: { type: "string", pattern: "x" } } } } }] }, "unsupported_request_tool_schema"]]) {
+    assert.throws(() => prepareSillyTavernRequest(request(extra), { ...adapters,
+      convertGooglePrompt() { assert.fail("a bypassed request must not be converted"); },
+    }), { code, status: 400 });
+  }
+});
+
+test("real tool calls reach ST as whole Gemini parts beside the restored text", async () => {
+  const realPart = { functionCall: { name: "lookup", args: { query: "天气" } }, thoughtSignature: "sig-new" };
+  for (const [mode, stream] of [["streaming", true], ["buffered", true], ["buffered", false]]) {
+    const prepared = prepareSillyTavernRequest(request({ tools: [lookupTool], tool_choice: "auto", vertex_anti_truncation: mode, stream }), adapters);
+    const parts = [{ text: "思考", thought: true }, { functionCall: { name: prepared.toolName, args: { content: "我去查。" } } }, realPart];
+    const upstream = prepared.upstreamStream
+      ? new Response(sseData({ candidates: [{ content: { role: "model", parts } }] }) + sseData({ candidates: [{ finishReason: "STOP" }] }))
+      : Response.json({ candidates: [{ content: { role: "model", parts }, finishReason: "STOP" }] });
+    const restored = await restoreSillyTavernResponse(upstream, prepared);
+    if (!stream) {
+      const result = await restored.json();
+      assert.equal(result.choices[0].message.content, "我去查。");
+      assert.equal(result.choices[0].finish_reason, "tool_calls");
+      assert.deepEqual(result.responseContent.parts, [{ thought: true, text: "思考" }, { text: "我去查。" }, realPart]);
+      continue;
+    }
+    const text = await restored.text();
+    assert.equal(contents(text), "我去查。");
+    assert.ok(!text.includes(prepared.toolName));
+    // ST's stream reader ignores the text of an event that carries a function call.
+    const calls = events(text).filter(event => event.candidates?.[0]?.content?.parts?.some(part => part.functionCall));
+    assert.deepEqual(calls.map(event => event.candidates[0].content.parts), [[realPart]]);
+    assert.ok(events(text).some(event => event.candidates?.[0]?.finishReason === "STOP"));
+  }
+  // Gemini 4 Argon gets its native call ID back next to the signature.
+  const argon = prepareSillyTavernRequest(request({ model: "gemini-4-argon", tools: [lookupTool], stream: false }), adapters);
+  const argonPart = { functionCall: { id: "fc-1", name: "lookup", args: { query: "天气" } }, thoughtSignature: "sig-4" };
+  const result = await (await restoreSillyTavernResponse(Response.json({ candidates: [{ content: { role: "model", parts: [
+    { functionCall: { name: argon.toolName, args: { content: "好" } } }, argonPart] }, finishReason: "STOP" }] }), argon)).json();
+  assert.deepEqual(result.responseContent.parts, [{ text: "好" }, argonPart]);
 });
 
 test("SillyTavern credentials stay per-user and selected secret; destinations cannot be overridden", () => {
@@ -499,7 +563,7 @@ test("plugin failures report their fixed code without consuming the response", a
   assert.deepEqual(statuses.at(-1), { error: 404 });
   reply = () => Response.json(failure, { status: 429 });
   await intercept(GENERATE_PATH, { method: "POST", body: JSON.stringify({ ...body, tools: [{}] }) });
-  assert.deepEqual(statuses.at(-1), { bypass: "existing-tools" });
+  assert.deepEqual(statuses.at(-1), { bypass: "tool-schema" });
 });
 
 test("image conversion failures are labelled as image input, not anti-truncation", async t => {
@@ -641,6 +705,25 @@ test("Continue delivers only the upstream suffix in one request across stream, b
   assert.equal(failed.status, 429);
   assert.equal((await failed.json()).error.code, "vertex_upstream_http_error");
   assert.equal(sent.length, count + 1);
+});
+
+test("client tools keep ST's route until the server plugin reports it understands them", async () => {
+  const calls = [], statuses = [], asked = [];
+  let features = [];
+  const intercept = createFetchInterceptor(async (...args) => { calls.push(args); return new Response("OK"); }, { origin: "http://localhost",
+    getMode: () => "streaming", onStatus: s => statuses.push(s),
+    ensureBackend: async feature => { asked.push(feature); return !feature || features.includes(feature); } });
+  const tools = { method: "POST", body: JSON.stringify({ ...body, tools: [lookupTool], tool_choice: "auto" }) };
+  await intercept(GENERATE_PATH, tools);
+  assert.deepEqual(calls.at(-1), [GENERATE_PATH, tools]);
+  assert.deepEqual(statuses.at(-1), { bypass: "server-tools" });
+  await intercept(GENERATE_PATH, { method: "POST", body: JSON.stringify(body) });
+  assert.equal(calls.at(-1)[0], PLUGIN_PATH + "/generate");
+  features = PLUGIN_FEATURES;
+  await intercept(GENERATE_PATH, { method: "POST", body: JSON.stringify({ ...body, messages: [...body.messages, ...toolHistory] }) });
+  assert.equal(calls.at(-1)[0], PLUGIN_PATH + "/generate");
+  assert.deepEqual(asked, [TOOLS_FEATURE, TOOLS_FEATURE]);
+  assert.ok(PLUGIN_FEATURES.includes(TOOLS_FEATURE));
 });
 
 test("the extension accepts any server plugin from the compatibility floor up, newer ones included", () => {

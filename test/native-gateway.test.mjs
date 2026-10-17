@@ -102,7 +102,7 @@ test("a SillyTavern-shaped image with a low detail level keeps that resolution o
   assert.deepEqual(body.contents[0].parts[1], { inlineData: { mimeType: "image/png", data: "iVBORw0KGgo=" } });
 });
 
-test("native JSON output and real tools bypass the wrapper; plain responses work with anti-truncation disabled", async t => {
+test("native JSON output bypasses the wrapper, real tools ride beside it; plain responses work with anti-truncation disabled", async t => {
   const json = await fixture(t, "express", "standard");
   const result = await (await json.post({ response_format: { type: "json_object" } })).json();
   assert.equal(result.choices[0].message.content, '{"ok":true}');
@@ -111,7 +111,8 @@ test("native JSON output and real tools bypass the wrapper; plain responses work
   const tool = await fixture(t, "express", "flex", true);
   const wire = await (await tool.post({ tools: [{ type: "function", function: { name: "real_tool", parameters: { type: "object" } } }] })).text();
   assert.match(wire, /real_tool/); assert.match(wire, /tool_calls/); assert.match(wire, /\[DONE\]/);
-  assert.equal(tool.requests[0].body.toolConfig?.functionCallingConfig?.streamFunctionCallArguments, undefined);
+  assert.equal(tool.requests[0].body.tools[0].functionDeclarations.length, 2);
+  assert.deepEqual(tool.requests[0].body.toolConfig, { functionCallingConfig: { mode: "ANY" } });
   const plain = await fixture(t, "express", "standard", true, { antiTruncation: false });
   const plainWire = await (await plain.post({})).text();
   assert.match(plainWire, /content/); assert.match(plainWire, /\[DONE\]/);

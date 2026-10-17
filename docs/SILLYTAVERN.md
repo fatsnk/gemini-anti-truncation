@@ -55,7 +55,7 @@ node dist/sillytavern/install.mjs ~/SillyTavern
 
 发现用 Git、扩展管理器或手动复制安装的副本（包括各用户自己的扩展目录）时，安装程序列出路径并停止，不覆盖也不删除，以免插件被加载两次。更新时下载新版安装包再运行一次；用安装包装的副本不是 Git 仓库，不会随酒馆的插件自动更新或扩展管理器更新。
 
-安装包在 [GitHub Release `sillytavern-v0.4.0`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.4.0) 下载 `vertex-anti-truncation-sillytavern-0.4.0.zip`，可用同页的 `SHA256.txt` 校验。压缩包只在发版时更新，版本号也只在发版时改变；发版之后 `main` 上的新改动不会进入已发布的压缩包。要装 `main` 的最新代码，在本仓库运行 `npm run package:sillytavern`，生成的 `dist/sillytavern` 就是安装包内容；打包不需要先安装依赖。
+安装包在 [GitHub Release `sillytavern-v0.5.0`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.5.0) 下载 `vertex-anti-truncation-sillytavern-0.5.0.zip`，可用同页的 `SHA256.txt` 校验。压缩包只在发版时更新，版本号也只在发版时改变；发版之后 `main` 上的新改动不会进入已发布的压缩包。要装 `main` 的最新代码，在本仓库运行 `npm run package:sillytavern`，生成的 `dist/sillytavern` 就是安装包内容；打包不需要先安装依赖。
 
 ## 从 GitHub 安装
 
@@ -110,7 +110,7 @@ npm ci --ignore-scripts
 - **TauriTavern**：只有 UI 扩展，在 TT 的扩展管理里更新；用 Git 克隆装的，也可以在 TT 关闭时于该文件夹运行 `git pull --ff-only`。
 - **AI 助手按四条命令装的**：重新执行那四条命令即可，安装程序会认出自己装的副本并更新。
 
-版本检查：扩展只要求服务端插件不低于 0.3.1。服务端比扩展新或旧都能正常使用，点“检查插件连接”时面板会建议更新较旧的一方；服务端低于 0.3.1 或找不到时，面板说明原因和更新办法，“继续”和图片输入请求停止发送。这条规则从 2026-10-14 之后的 `main` 起生效。更早的扩展，包括 0.4.0 安装包里的，要求两边版本号完全相同：服务端先自动更新时，面板会提示版本不匹配并拦下“继续”和图片输入，在扩展管理器里更新扩展即可。Gemini 4 的升级说明见 [Gemini 4 升级方式](GEMINI4.md#升级方式)。
+版本检查：扩展只要求服务端插件不低于 0.3.1。服务端比扩展新或旧都能正常使用，点“检查插件连接”时面板会建议更新较旧的一方；服务端低于 0.3.1 或找不到时，面板说明原因和更新办法，“继续”和图片输入请求停止发送。这条规则从 2026-10-14 之后的 `main` 起生效。更早的扩展，包括 0.4.0 安装包里的，要求两边版本号完全相同：服务端先自动更新时，面板会提示版本不匹配并拦下“继续”和图片输入，在扩展管理器里更新扩展即可。带工具的请求另看服务端是否报告 `client-tools` 能力（0.5.0 起提供）：没有时这些请求照旧走酒馆原流程，面板写明“服务端插件较旧”，其他请求不受影响。Gemini 4 的升级说明见 [Gemini 4 升级方式](GEMINI4.md#升级方式)。
 
 - 不要把相同扩展重复安装到“当前用户”和“所有用户”。
 - 如果已经使用 ZIP 手动安装到 `vertex-anti-truncation`，无需再装一份。需要迁移为 Git 管理时，先关闭抗截断、停用旧 UI 扩展，并把旧前后端目录备份移到各自加载目录之外，再按上述步骤安装。保留酒馆凭据和设置。
@@ -136,7 +136,7 @@ npm run package:sillytavern
 
 复制后在 `plugins/vertex-anti-truncation` 目录运行 `npm ci --ignore-scripts` 安装图片渲染依赖。服务端需启用 `enableServerPlugins: true`，然后重启酒馆、刷新网页。
 
-当前 Release 为 [`sillytavern-v0.4.0`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.4.0)，ZIP 内含安装程序和上表两个目录。旧版 [`sillytavern-v0.3.1`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.3.1) 不含 Gemini 4 与 TauriTavern 适配；[`sillytavern-v0.1.0`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.1.0) 的 ZIP 不含 Unicode 与图片输入。
+当前 Release 为 [`sillytavern-v0.5.0`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.5.0)，ZIP 内含安装程序和上表两个目录。旧版 [`sillytavern-v0.4.0`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.4.0) 遇到客户端工具时整次跳过抗截断；[`sillytavern-v0.3.1`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.3.1) 不含 Gemini 4 与 TauriTavern 适配；[`sillytavern-v0.1.0`](https://github.com/ken050210/vertex-streaming-anti-truncation/releases/tag/sillytavern-v0.1.0) 的 ZIP 不含 Unicode 与图片输入。
 
 ## 使用
 
@@ -161,7 +161,8 @@ Express、Flex、Priority 需要将地区设为 `global`。完整服务账号的
 ## 范围与边界
 
 - 不修改酒馆核心文件。前端仅重定向同源 `/api/backends/chat-completions/generate` 中符合条件的 Vertex POST 请求；其他来源和关闭状态保持原路由。
-- 现有工具、工具历史、JSON/Schema、多个候选、联网搜索、图片生成、非 Gemini 模型、反向代理请求，以及超过 8 MiB 的抗截断请求走酒馆原流程。抗截断开启时，面板会显示本次跳过原因。
+- 客户端工具（酒馆开启函数调用后由扩展注册的工具，如 WebSearch 扩展的搜索工具）与工具调用历史也经抗截断传输（0.5.0 起）：这些工具排在抗截断的合成工具之前一起声明，模型可在同一回复里写正文并调用工具。工具调用以 Gemini 原生格式（带思考签名，Gemini 4 另带调用 ID）交回酒馆，由酒馆照常执行，下一轮请求带上工具结果；工具历史仍由酒馆自己的提示词转换处理。流式模式下带客户端工具时不逐段读取工具参数，正文在模型写完后一次到达，思考过程仍逐步显示。
+- 旧版 functions、要求必须调用某个工具的请求、无法转为 Vertex 原生声明的工具（如参数 Schema 含 `default`、`pattern`），以及 JSON/Schema、多个候选、联网搜索、图片生成、非 Gemini 模型、反向代理请求和超过 8 MiB 的抗截断请求走酒馆原流程；服务端插件未报告 `client-tools` 能力时，带工具的请求也走原流程。酒馆开启函数调用后每次请求都会带上已注册的工具，所以只要有一个工具无法转换，本次请求就整体走原流程。抗截断开启时，面板会显示本次跳过原因。
 - 抗截断会在提示词末尾追加一条传输格式的 user 指令。“继续”使用上面的新增续文指令；其他以 assistant 结尾的预设仍按普通完整回答处理，不能视为原生预填充续写。
 - 保留酒馆的提示词后处理、角色名称、系统提示词、媒体转换、停止串、采样与思考设置；使用本项目已有的模型参数兼容规则。
 - 使用本项目的工具正文还原和回复完整性检查。不会把缺少结束标记、空回复或损坏的工具参数当成成功；保留长度限制及过滤结果。
@@ -189,6 +190,7 @@ Express、Flex、Priority 需要将地区设为 `global`。完整服务账号的
 - Vertex 的“附加参数”为空或 JSON 对象时会与上述字段合并；写成 YAML 时无法合并，本次使用普通 Vertex，面板显示原因。改写为 JSON 对象即可。
 - 还原失败时，流式回复以错误事件结束，非流式返回 HTTP 502，面板显示错误代码，不重试。TauriTavern 自己报告的请求错误（凭据、配额等）仍按它原有方式显示为回复文本。
 - Gemini 4 Argon 的思考等级与采样参数由 TauriTavern 处理，需要所用版本已收录该模型（2026-10-14 核对：`dev` 分支已收录，稳定版 2.3.0 未收录）。输出额度按流式上限 65,536 检查，超限返回 `gemini4_long_decode_required`。
+- 带客户端工具或工具历史的请求在 TauriTavern 中走它的原流程（面板显示“TauriTavern 下工具调用暂不经过抗截断”），因为它的后台如何转换工具历史、如何转发真实工具调用尚未核对。
 - 8 MiB 请求大小限制、旁路条件与“范围与边界”中的其余说明同样适用。
 
 ### 依据与验证状态
@@ -223,7 +225,7 @@ Unicode 转码在浏览器中、抗截断分流之前执行；普通／旁路请
 
 图片由服务端插件渲染为无损 WebP 页面。当前轮／全部会话规则与独立网关一致，系统指令保留文字。“图片·当前轮”只转换最后一条 AI 消息之后的文本；之后没有可转换文本时（例如开启 Continue prefill 后点击“继续”，或预设以 AI 消息结尾作预填充），本次按原文发送。图片输入请求一律按非流式交付，即使抗截断关闭、酒馆开启了流式也是如此；没有可转换文本时面板会说明本次按原文发送，若酒馆开启了流式且未选择非流式抗截断，还会提示仍按非流式交付。成功转换时面板显示页数。
 
-发送图片请求前，前端会确认服务端插件版本一致；未就绪或版本不匹配时停止发送，不会改用明文。请求含图片输入不支持的内容时停止发送，面板会写明原因（如已有工具调用、此模型不适用、反向代理）。转换前请求本身超过 8 MiB 返回 413 `request_too_large`；含 emoji、控制字符或字体缺字时返回 400 `image_input_unsupported_characters`（“全部会话”会检查整段历史）；渲染失败返回 503 `image_render_failed`。面板会用中文说明这些错误。零宽空格等不可见格式字符（ZWSP、ZWNJ、WJ、BOM、VS15）不影响发送。
+发送图片请求前，前端会确认服务端插件版本一致；未就绪或版本不匹配时停止发送，不会改用明文。请求含图片输入不支持的内容时停止发送，面板会写明原因（如旧版 functions 工具、此模型不适用、反向代理）。转换前请求本身超过 8 MiB 返回 413 `request_too_large`；含 emoji、控制字符或字体缺字时返回 400 `image_input_unsupported_characters`（“全部会话”会检查整段历史）；渲染失败返回 503 `image_render_failed`。面板会用中文说明这些错误。零宽空格等不可见格式字符（ZWSP、ZWNJ、WJ、BOM、VS15）不影响发送。
 
 图片经 base64 后连同请求中其余内容合计不得超过 8 MiB（仅有图片时约 6 MiB，中文约 2.4–4.5 万字、约 20–28 页，视内容和换行而定；保留为文字的系统指令和角色卡，以及当前轮模式下的此前历史，也占用这一额度），超出返回 413 `image_input_too_large`。每条含文字的消息（每个文本片段）至少单独占一页，每次请求最多 100 页，因此“全部会话”最多约 100 条这样的消息；长聊天请改用“图片·当前轮”。
 
@@ -231,8 +233,8 @@ Unicode 转码在浏览器中、抗截断分流之前执行；普通／旁路请
 
 ### 版本与验收
 
-TauriTavern 适配和 Gemini 4 Argon 适配随 0.4.0 发布。在 SillyTavern 中扩展的行为不变，版本号改为 0.4.0。
+客户端工具与抗截断共用随 0.5.0 发布，同时独立网关发布 0.9.0。TauriTavern 适配和 Gemini 4 Argon 适配随 0.4.0 发布。
 
 版本号只在发版时更新。发版之后 `main` 上的改动在下一次发版前不改版本号，面板的版本检查分不出新旧；要确认装到的代码是否含某项改动，看它来自哪个提交。
 
-当前前端与服务端均为 0.4.0，对应标签／Release `sillytavern-v0.4.0`。0.3.1（标签 `sillytavern-v0.3.1`）包含“继续”适配、流式修复和一键安装包。建议前后端一起更新；版本检查的规则见“更新与已有手动安装”。0.3.0 对应标签 `sillytavern-v0.3.0`（与网关 `v0.7.0` 为同一提交）；0.2.0 未发布标签；上方 v0.1.0 标签／Release 不含 Unicode 与图片输入。Unicode 转码在 v0.2.0（当时为独立勾选框）时完成的短请求验收见[验收记录](UNICODE-INPUT-AUDIT.md)（英文）。0.4.0 与 0.3.1 的验证和剩余验收范围见[验收说明](VALIDATION.md)。
+当前前端与服务端均为 0.5.0，对应标签／Release `sillytavern-v0.5.0`。0.4.0（标签 `sillytavern-v0.4.0`）包含 TauriTavern 与 Gemini 4 Argon 适配。0.3.1（标签 `sillytavern-v0.3.1`）包含“继续”适配、流式修复和一键安装包。建议前后端一起更新；版本检查的规则见“更新与已有手动安装”。0.3.0 对应标签 `sillytavern-v0.3.0`（与网关 `v0.7.0` 为同一提交）；0.2.0 未发布标签；上方 v0.1.0 标签／Release 不含 Unicode 与图片输入。Unicode 转码在 v0.2.0（当时为独立勾选框）时完成的短请求验收见[验收记录](UNICODE-INPUT-AUDIT.md)（英文）。0.4.0 与 0.3.1 的验证和剩余验收范围见[验收说明](VALIDATION.md)。

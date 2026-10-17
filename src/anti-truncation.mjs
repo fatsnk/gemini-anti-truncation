@@ -20,20 +20,28 @@ export function antiTruncationLogFields(metadata) {
     } };
 }
 
-// Opt-in transport for text replies. Existing client tools (including Tavern
-// Helper's transport), structured output and multi-candidate requests bypass it.
+// Opt-in transport for text replies. Client tools and tool history stay usable next to
+// the randomly named synthetic tool. A forced tool choice (no text reply expected, e.g.
+// Tavern Helper's own transport), the legacy functions API, structured output and
+// multi-candidate requests bypass it.
 export function prepareAntiTruncation(payload, enabled, streamArguments = false, { continuation = false } = {}) {
     const skip = reason => ({ payload, toolName: null, reason });
     if (!enabled) return skip("disabled");
-    if (payload.tools?.length || payload.functions?.length) return skip("existing-tools");
-    if (payload.tool_choice != null || payload.function_call != null) return skip("tool-choice");
+    if (payload.functions?.length) return skip("existing-tools");
+    if (payload.function_call != null || (payload.tool_choice != null &&
+        payload.tool_choice !== "auto" && payload.tool_choice !== "none")) return skip("tool-choice");
     if (payload.response_format && payload.response_format.type !== "text") return skip("structured-output");
     if ((payload.n != null && payload.n !== 1) || (payload.best_of != null && payload.best_of !== 1)) return skip("multiple-candidates");
-    if (payload.messages.some(message => message.role === "tool" || message.role === "function" ||
-        message.tool_calls?.length || message.function_call)) return skip("tool-history");
+    if (payload.messages.some(message => message.role === "function" || message.function_call)) return skip("tool-history");
+    const clientTools = Array.isArray(payload.tools) ? payload.tools : [];
     const requested = streamArguments && payload.stream === true;
-    const nativeStreaming = requested && supportsNativeTextStream(payload);
+    // The native stream only carries the synthetic text call; client tools use the fallback.
+    const nativeStreaming = requested && !clientTools.length && supportsNativeTextStream(payload);
     const toolName = "router_emit_" + Array.from(crypto.getRandomValues(new Uint8Array(12)), byte => byte.toString(16).padStart(2, "0")).join("");
+    // Callable client tools turn the forced synthetic call into "call some tool": the text
+    // goes through the synthetic one, real calls pass through. "none" keeps them uncallable.
+    const callable = clientTools.length > 0 && payload.tool_choice !== "none";
+    const text = continuation ? "only the new continuation text" : "the entire user-visible answer";
     return {
         toolName,
         nativeStreaming,
@@ -42,15 +50,18 @@ export function prepareAntiTruncation(payload, enabled, streamArguments = false,
             ...payload,
             messages: [...payload.messages, {
                 role: "user",
-                content: `Transport format for this reply: call ${toolName} exactly once. Put ${continuation ? "only the new continuation text" : "the entire user-visible answer"} in its content string, preserving all requested formatting, markup, language and sections. The function only transports text and performs no external action.${continuation ? "\n" + CONTINUATION_INSTRUCTION : ""}`,
+                content: (callable
+                    ? `Transport format for this reply: put all user-visible text, if any, in exactly one call of ${toolName}; its content string holds ${text}, preserving all requested formatting, markup, language and sections. ${toolName} only transports text and performs no external action. Call the other tools whenever the task needs them, with or without ${toolName}.`
+                    : `Transport format for this reply: call ${toolName} exactly once. Put ${text} in its content string, preserving all requested formatting, markup, language and sections. The function only transports text and performs no external action.`)
+                    + (continuation ? "\n" + CONTINUATION_INSTRUCTION : ""),
             }],
-            tools: [{ type: "function", function: {
+            tools: [...clientTools, { type: "function", function: {
                 name: toolName,
                 description: continuation ? "Deliver only the new continuation text to append to the existing message." : "Deliver the complete user-visible reply as text.",
                 parameters: { type: "object", properties: { content: { type: "string" } }, required: ["content"], additionalProperties: false },
             } }],
-            tool_choice: { type: "function", function: { name: toolName } },
-            parallel_tool_calls: false,
+            tool_choice: callable ? "required" : { type: "function", function: { name: toolName } },
+            ...(callable ? {} : { parallel_tool_calls: false }),
         },
     };
 }
@@ -243,7 +254,7 @@ class StreamRestorer {
     state(index) {
         if (!this.choices.has(index)) {
             if (this.choices.size >= 16) throw failure("anti_truncation_too_many_choices");
-            this.choices.set(index, { calls: new Map(), channel: null, real: false, terminal: false });
+            this.choices.set(index, { calls: new Map(), channel: null, real: 0, terminal: false });
         }
         return this.choices.get(index);
     }
@@ -254,7 +265,9 @@ class StreamRestorer {
             state.calls.set(index, { kind: "unknown", name: "", pending: [], pendingBytes: 0, decoder: new ContentDecoder() });
         }
         const slot = state.calls.get(index);
-        if (slot.kind === "real") return { kept: [call], text: "" };
+        // Real calls are renumbered so the client's tool_calls list has no gap where the
+        // synthetic call was removed.
+        if (slot.kind === "real") return { kept: [{ ...call, index: slot.clientIndex }], text: "" };
         if (typeof call.function?.name === "string") slot.name += call.function.name;
         if (slot.kind === "synthetic" && slot.name !== this.toolName) throw failure("anti_truncation_changed_tool_name");
         slot.pendingBytes += JSON.stringify(call).length;
@@ -271,8 +284,8 @@ class StreamRestorer {
         slot.pending = [];
         slot.pendingBytes = 0;
         if (slot.kind === "real") {
-            state.real = true;
-            return { kept: pending, text: "" };
+            slot.clientIndex = state.real++;
+            return { kept: pending.map(delta => ({ ...delta, index: slot.clientIndex })), text: "" };
         }
         let text = "";
         for (const delta of pending) {

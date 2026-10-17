@@ -7,8 +7,10 @@ const direct = tauri && { prepare: tauri.prepareTauriTavernRequest, restore: tau
 const context = SillyTavern.getContext();
 const events = context.eventTypes ?? context.event_types;
 const labels = { off: "关闭（普通 Vertex）", buffered: "非流式抗截断", streaming: "流式抗截断" };
-const reasons = { "existing-tools": "已有工具调用", "structured-output": "结构化输出", "multiple-candidates": "多个候选回复",
-  "tool-history": "工具历史", "web-search": "联网搜索", "image-generation": "图片生成", "reverse-proxy": "反向代理",
+const reasons = { "existing-tools": "旧版 functions 工具", "tool-choice": "请求指定必须调用工具", "tool-schema": "工具定义无法转为 Vertex 原生格式",
+  "server-tools": "服务端插件较旧，不支持工具调用；更新服务端插件后重启酒馆", "tauri-tools": "TauriTavern 下工具调用暂不经过抗截断",
+  "structured-output": "结构化输出", "multiple-candidates": "多个候选回复",
+  "tool-history": "旧版 function 工具历史", "web-search": "联网搜索", "image-generation": "图片生成", "reverse-proxy": "反向代理",
   model: "此模型不适用", "too-large": "请求超过 8 MiB", "additional-parameters": "Vertex 附加参数不是 JSON 对象，无法合并" };
 const errors = { unicode_floor_required: "找不到真实用户楼层，已停止发送。请先输入消息，或关闭 Unicode 转码。",
   unicode_input_too_large: "转码后的请求超过大小限制，已停止发送。请缩短输入或关闭 Unicode 转码。",
@@ -20,7 +22,7 @@ const errors = { unicode_floor_required: "找不到真实用户楼层，已停�
   image_render_failed: "服务端图片渲染失败，已停止发送，未改用明文。",
   request_too_large: "请求超过 8 MiB，插件已拒绝发送。请减少附件或聊天历史。" };
 const updateServer = "用安装包装的，下载新版安装包再运行一次；用 Git 装的，在服务端插件目录运行 git pull --ff-only 和 npm ci --ignore-scripts。之后重启酒馆并重新检查。";
-let status, select, backendReady, backendWarning;
+let status, select, backendReady, backendFeatures = [], backendWarning;
 function settings() {
   const store = SillyTavern.getContext().extensionSettings;
   store[PLUGIN_ID] ??= { mode: "off", unicodeInput: false };
@@ -53,12 +55,14 @@ function updateStatus(result) {
 
 async function checkBackend(silent = false) {
   if (!silent) showStatus("正在检查服务端插件…");
-  let version;
+  let version, features = [];
   try {
     const response = await fetch(`${PLUGIN_PATH}/status`, { headers: context.getRequestHeaders(), signal: AbortSignal.timeout(5000) });
     const data = response.ok ? await response.json() : null;
     if (data?.id === PLUGIN_ID && typeof data.version === "string") version = data.version;
+    if (version && Array.isArray(data.features)) features = data.features;
   } catch {}
+  backendFeatures = features;
   backendReady = Boolean(version) && compareVersions(version, MIN_SERVER_VERSION) >= 0;
   backendWarning = !version ? "找不到服务端插件。请安装配套服务端插件，确认 config.yaml 中 enableServerPlugins 为 true，重启酒馆后重新检查。"
     : `服务端插件 ${version} 太旧，需要 ${MIN_SERVER_VERSION} 或更新。${updateServer}`;
@@ -132,8 +136,9 @@ function mount() {
       getImageInput: () => direct ? "off" : settings().imageInput || "off",
       getUnicodeInput: () => settings().unicodeInput === true,
       getUserFloor: () => latestUserFloor(SillyTavern.getContext().chat),
-      // Image input and Continue require a matching server plugin.
-      ensureBackend: async () => Boolean(direct) || backendReady || checkBackend(true), onStatus: updateStatus, direct });
+      // Image input, Continue and client tools require a matching server plugin.
+      ensureBackend: async feature => Boolean(direct) ||
+        Boolean((backendReady || await checkBackend(true)) && (!feature || backendFeatures.includes(feature))), onStatus: updateStatus, direct });
   }
   if (!direct) void checkBackend(true);
 }

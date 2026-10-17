@@ -210,12 +210,18 @@ test("Gemini 4 Argon output limits are checked before TauriTavern sends anything
 test("requests the transport cannot carry and other providers keep TauriTavern's route unchanged", async () => {
   const original = host(new Response("{}"));
   const wrapped = intercept(original, "streaming");
+  const lookup = { type: "function", function: { name: "lookup", parameters: { type: "object", properties: { query: { type: "string" } } } } };
+  // Client tools and tool history are untested in TauriTavern, so they also keep its route.
+  const toolRequests = [{ tools: [lookup], tool_choice: "auto" },
+    { messages: [...body.messages, { role: "assistant", tool_calls: [{ id: "call-1", type: "function", function: { name: "lookup", arguments: "{}" } }] },
+      { role: "tool", tool_call_id: "call-1", content: "晴" }] }];
   for (const patch of [{ tools: [{}] }, { enable_web_search: true }, { model: "claude-sonnet-5" }, { reverse_proxy: "https://example.invalid" },
-    { chat_completion_source: "makersuite" }, { json_schema: { value: {} } }]) {
+    { chat_completion_source: "makersuite" }, { json_schema: { value: {} } }, ...toolRequests]) {
     const init = { method: "POST", body: JSON.stringify({ ...body, ...patch }) };
     await wrapped(GENERATE_PATH, init);
     assert.strictEqual(original.calls.at(-1).init, init);
   }
+  for (const patch of toolRequests) assert.deepEqual(prepareTauriTavernRequest({ ...body, ...patch }, "streaming"), { bypass: "tauri-tools" });
   const off = { method: "POST", body: JSON.stringify(body) };
   let passed;
   await intercept(async (input, init) => { passed = init; return new Response("{}"); }, "off")(GENERATE_PATH, off);

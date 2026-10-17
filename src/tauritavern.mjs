@@ -5,7 +5,7 @@ import { guardCompletionStream } from "./completion-integrity.mjs";
 import { validateGemini4Output } from "./gemini4.mjs";
 import { completedSillyTavernResponse, toSillyTavernStream } from "./sillytavern.mjs";
 import { createSseParser, isObject, sseData, transformSse } from "./wire.mjs";
-import { BODY_LIMIT } from "../integrations/sillytavern/shared.js";
+import { BODY_LIMIT, usesTools } from "../integrations/sillytavern/shared.js";
 
 // TauriTavern replaces SillyTavern's Node server with a Rust backend, so no
 // server plugin can run there. The UI extension does the whole job in the
@@ -26,6 +26,9 @@ function includedBody(value) {
 }
 
 export function prepareTauriTavernRequest(body, mode) {
+  // How TauriTavern's own backend converts tool history and forwards real calls here
+  // has not been checked, so tool requests keep its plain route.
+  if (usesTools(body)) return { bypass: "tauri-tools" };
   const included = includedBody(body.custom_include_body);
   if (!included) return { bypass: "additional-parameters" };
   // The upstream request is always streamGenerateContent here.

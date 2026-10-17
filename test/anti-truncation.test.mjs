@@ -44,15 +44,17 @@ test("opt-in preparation preserves parameters and isolates the original request"
   assert.equal(prepareAntiTruncation(payload, false).payload, payload);
 });
 
-test("client tools, Tavern transport, explicit selection, JSON and candidate conflicts bypass by identity", () => {
+test("forced tool selection, Tavern transport, legacy functions, JSON and candidate conflicts bypass by identity", () => {
+  const tavern = [{ type: "function", function: { name: "tavern_emit" } }];
   for (const extra of [
-    { tools: [{ type: "function", function: { name: "tavern_emit" } }] },
-    { functions: [{ name: "legacy" }] }, { tool_choice: "auto" }, { tool_choice: "none" },
-    { function_call: "auto" }, { response_format: { type: "json_object" } },
+    { tools: tavern, tool_choice: { type: "function", function: { name: "tavern_emit" } } },
+    { tools: tavern, tool_choice: "required" },
+    { functions: [{ name: "legacy" }] }, { function_call: "auto" },
+    { response_format: { type: "json_object" } },
     { response_format: { type: "json_schema", json_schema: { name: "database" } } },
     { n: 2 }, { best_of: 2 },
-    { messages: [{ role: "assistant", tool_calls: [call("{}")] }] },
-    { messages: [{ role: "tool", content: "result" }] },
+    { messages: [{ role: "assistant", function_call: { name: "legacy", arguments: "{}" } }] },
+    { messages: [{ role: "function", name: "legacy", content: "result" }] },
   ]) {
     const request = { ...payload, ...extra };
     const result = prepareAntiTruncation(request, true);
@@ -60,6 +62,40 @@ test("client tools, Tavern transport, explicit selection, JSON and candidate con
     assert.equal(result.toolName, null);
   }
   assert.ok(prepareAntiTruncation({ ...payload, tools: [], n: 1, response_format: { type: "text" } }, true).toolName);
+});
+
+test("client tools stay callable beside the synthetic tool, and tool history is wrapped", () => {
+  const tools = [{ type: "function", function: { name: "get_weather", parameters: { type: "object", properties: {} } } }];
+  const history = [{ role: "user", content: "Weather?" },
+    { role: "assistant", content: "Checking.", tool_calls: [call("{}", "get_weather")] },
+    { role: "tool", tool_call_id: "call-test", content: "sunny" }];
+  for (const tool_choice of [undefined, "auto"]) {
+    const request = { ...payload, messages: history, tools, tool_choice, parallel_tool_calls: true };
+    const before = structuredClone(request);
+    const prepared = prepareAntiTruncation(request, true);
+    assert.deepEqual(request, before);
+    assert.equal(prepared.reason, "tool-transport");
+    assert.deepEqual(prepared.payload.tools.slice(0, 1), tools);
+    assert.equal(prepared.payload.tools[1].function.name, prepared.toolName);
+    assert.equal(prepared.payload.tool_choice, "required");
+    assert.equal(prepared.payload.parallel_tool_calls, true);
+    assert.deepEqual(prepared.payload.messages.slice(0, -1), history);
+    assert.match(prepared.payload.messages.at(-1).content, /Call the other tools whenever the task needs them/);
+  }
+  assert.equal(Object.hasOwn(prepareAntiTruncation({ ...payload, tools }, true).payload, "parallel_tool_calls"), false);
+  // Continue keeps its suffix-only wording with callable tools.
+  const continued = prepareAntiTruncation({ ...payload, tools }, true, false, { continuation: true }).payload.messages.at(-1).content;
+  assert.match(continued, /holds only the new continuation text/);
+  assert.match(continued, /Call the other tools/);
+  assert.match(continued, /exact end/);
+  // "none" keeps the client tools declared but forces the text transport.
+  for (const request of [{ ...payload, tools, tool_choice: "none", parallel_tool_calls: true }, { ...payload, messages: history }, { ...payload, tool_choice: "auto" }]) {
+    const prepared = prepareAntiTruncation(request, true);
+    assert.equal(prepared.payload.tool_choice.function.name, prepared.toolName);
+    assert.equal(prepared.payload.parallel_tool_calls, false);
+    assert.equal(prepared.payload.tools.length, (request.tools?.length ?? 0) + 1);
+    assert.match(prepared.payload.messages.at(-1).content, /exactly once/);
+  }
 });
 
 test("experimental streaming selects native only for translatable text requests and preserves fallback fields", () => {
@@ -75,18 +111,19 @@ test("experimental streaming selects native only for translatable text requests 
   assert.equal(prepareAntiTruncation({ ...request, stream: false }, true, true).payload.extra_body, request.extra_body);
   assert.equal(prepareAntiTruncation(request, true).nativeStreaming, false);
   assert.equal(prepareAntiTruncation({ ...request, stream: false }, true, true).nativeStreaming, false);
-  for (const extra of [{ tools: [{ type: "function", function: { name: "client_tool" } }] },
-    { response_format: { type: "json_object" } }]) {
-    const bypass = { ...request, ...extra };
-    assert.equal(prepareAntiTruncation(bypass, true, true).payload, bypass);
-  }
+  const bypass = { ...request, response_format: { type: "json_object" } };
+  assert.equal(prepareAntiTruncation(bypass, true, true).payload, bypass);
+  // The native stream carries only the synthetic call, so client tools and tool history fall back.
   for (const extra of [{ custom: { preserved: true } }, { extra_body: [] }, { extra_body: { google: "invalid" } },
-    { messages: [{ role: "user", name: "Name", content: "test" }] }]) {
+    { messages: [{ role: "user", name: "Name", content: "test" }] },
+    { tools: [{ type: "function", function: { name: "client_tool" } }] },
+    { tools: [{ type: "function", function: { name: "client_tool" } }], tool_choice: "none" },
+    { messages: [{ role: "assistant", tool_calls: [call("{}", "client_tool")] }, { role: "tool", tool_call_id: "call-test", content: "done" }] }]) {
     const fallback = { ...request, ...extra };
     const result = prepareAntiTruncation(fallback, true, true);
     assert.equal(result.nativeStreaming, false);
     assert.equal(result.reason, "tool-transport-buffered-fields");
-    for (const key of Object.keys(extra).filter(k => k !== "messages")) assert.equal(result.payload[key], fallback[key]);
+    for (const key of Object.keys(extra).filter(k => !["messages", "tools", "tool_choice"].includes(k))) assert.equal(result.payload[key], fallback[key]);
   }
 });
 
@@ -148,12 +185,22 @@ test("ordinary SSE fallback is immediate, and only one text channel is used", as
   assert.equal(out.findLast(r => r.router_anti_truncation).router_anti_truncation.restored, false);
 });
 
-test("SSE preserves unowned tool deltas and tool finish semantics", async () => {
+test("SSE preserves unowned tool deltas, renumbered without the synthetic call, and tool finish semantics", async () => {
   const synthetic = event(chunk({ tool_calls: [call('{"content":"text"}')] }));
   const real = call("{}", "real_tool", 1);
-  const out = parse(await streamed([synthetic, event(chunk({ tool_calls: [real] })), event(chunk({}, "tool_calls")), event("[DONE]")]));
-  assert.deepEqual(out.find(r => r.choices?.[0]?.delta?.tool_calls).choices[0].delta.tool_calls, [real]);
+  const second = call('{"city":"Par', "real_tool", 2);
+  const rest = { index: 2, function: { arguments: 'is"}' } };
+  const out = parse(await streamed([synthetic, event(chunk({ tool_calls: [real] })), event(chunk({ tool_calls: [second] })),
+    event(chunk({ tool_calls: [rest] })), event(chunk({}, "tool_calls")), event("[DONE]")]));
+  assert.equal(contents(out), "text");
+  assert.deepEqual(out.filter(r => r.choices?.[0]?.delta?.tool_calls).map(r => r.choices[0].delta.tool_calls),
+    [[{ ...real, index: 0 }], [{ ...second, index: 1 }], [{ ...rest, index: 1 }]]);
   assert.equal(out.find(r => r.choices?.[0]?.finish_reason).choices[0].finish_reason, "tool_calls");
+  // A real call ahead of the synthetic one keeps index 0.
+  const first = parse(await streamed([event(chunk({ tool_calls: [call("{}", "real_tool", 0)] })),
+    event(chunk({ tool_calls: [call('{"content":"after"}', name, 1)] })), event(chunk({}, "tool_calls")), event("[DONE]")]));
+  assert.deepEqual(first.filter(r => r.choices?.[0]?.delta?.tool_calls).map(r => r.choices[0].delta.tool_calls), [[call("{}", "real_tool", 0)]]);
+  assert.equal(contents(first), "after");
 });
 
 test("SSE cannot turn malformed, interrupted or incomplete output into a successful stop", async () => {

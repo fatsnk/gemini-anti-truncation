@@ -143,15 +143,23 @@ test("saved aliases route different upstreams and three modes in JSON and SSE fo
   }
 });
 
-test("buffered aliases bypass wrapping for structured output and real tools while preserving client streaming", async t => {
+test("buffered aliases bypass wrapping for structured output while preserving client streaming, and wrap client tools", async t => {
   const f = await gateway(t);
-  for (const extra of [{ response_format: { type: "json_object" } }, { tools: [{ type: "function", function: { name: "real_tool", parameters: { type: "object" } } }] }]) {
-    const response = await f.post(profiles[1].id, true, extra);
-    assert.equal(response.status, 200); assert.match(await response.text(), /\[DONE\]/);
-    assert.ok(f.requests.at(-1).url.includes(":streamGenerateContent"));
-    assert.equal(f.requests.at(-1).body.toolConfig?.functionCallingConfig?.streamFunctionCallArguments, undefined);
-    assert.equal(f.events.at(-1).antiTruncation.restored, false);
-  }
+  const response = await f.post(profiles[1].id, true, { response_format: { type: "json_object" } });
+  assert.equal(response.status, 200); assert.match(await response.text(), /\[DONE\]/);
+  assert.ok(f.requests.at(-1).url.includes(":streamGenerateContent"));
+  assert.equal(f.requests.at(-1).body.toolConfig?.functionCallingConfig?.streamFunctionCallArguments, undefined);
+  assert.equal(f.events.at(-1).antiTruncation.restored, false);
+  // Client tools ride beside the synthetic tool in the alias's one non-streaming request.
+  const tools = await f.post(profiles[1].id, true, { tools: [{ type: "function", function: { name: "real_tool", parameters: { type: "object" } } }] });
+  assert.equal(tools.status, 200);
+  assert.equal(tools.headers.get("x-anti-truncation-transport"), "tool-transport-buffered");
+  const wire = await tools.text();
+  assert.match(wire, /real_tool/); assert.match(wire, /\[DONE\]/);
+  assert.ok(f.requests.at(-1).url.includes(":generateContent"));
+  assert.deepEqual(f.requests.at(-1).body.tools[0].functionDeclarations.map(declaration => declaration.name).slice(0, 1), ["real_tool"]);
+  assert.deepEqual(f.requests.at(-1).body.toolConfig, { functionCallingConfig: { mode: "ANY" } });
+  assert.equal(f.events.at(-1).antiTruncation.transport, "tool-transport-buffered");
 });
 
 test("normal compatible streams reject premature EOF and provider error events", { timeout: 5000 }, async t => {

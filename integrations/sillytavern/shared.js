@@ -1,10 +1,15 @@
 import { prepareUnicodeInput } from "../../src/unicode-input.mjs";
+import { vertexJsonSchema } from "../../src/vertex-schema.mjs";
 export const PLUGIN_ID = "vertex-anti-truncation";
-export const PLUGIN_VERSION = "0.4.0";
+export const PLUGIN_VERSION = "0.5.0";
 // The oldest server plugin that understands every request this extension may
 // send (Continue arrived in 0.3.1). SillyTavern updates a Git-installed server
 // plugin on start but not the extension, so a newer server is common.
 export const MIN_SERVER_VERSION = "0.3.1";
+// Versions change only at releases, so newer abilities are reported by name. A
+// server without "client-tools" rejects client tools and tool history; those keep ST's own route.
+export const TOOLS_FEATURE = "client-tools";
+export const PLUGIN_FEATURES = [TOOLS_FEATURE];
 export const MODES = ["off", "buffered", "streaming"];
 export const GENERATE_PATH = "/api/backends/chat-completions/generate";
 export const PLUGIN_PATH = `/api/plugins/${PLUGIN_ID}`;
@@ -28,21 +33,34 @@ export function latestUserFloor(chat) {
   return "";
 }
 
+export const usesTools = body => Boolean(body.tools?.length || body.tool_choice != null ||
+  (Array.isArray(body.messages) && body.messages.some(message => message?.role === "tool" || message?.tool_calls?.length || message?.tool_call_id ||
+    (Array.isArray(message?.content) && message.content.some(part => part?.type === "tool_calls" || part?.type === "tool_call_id")))));
+
+// ST registers its tools on every request while function calling is on, so a tool
+// that native declarations cannot hold would otherwise fail every reply.
+function nativeTool(tool) {
+  if (tool?.type !== "function" || typeof tool.function?.name !== "string" || !tool.function.name) return false;
+  try { vertexJsonSchema(tool.function.parameters ?? { type: "object", properties: {} }); return true; }
+  catch { return false; }
+}
+
 // Shared by both sides: unsupported requests keep SillyTavern's original route.
 export function bypassReason(body, mode) {
   if (mode === "off" || !MODES.includes(mode)) return "disabled";
   if (body?.chat_completion_source !== "vertexai") return "other-provider";
   if (body.reverse_proxy) return "reverse-proxy";
   if (!/^gemini-[\w.-]+$/.test(body.model || "") || /image|embedding/i.test(body.model)) return "model";
-  if (body.tools?.length || body.functions?.length || body.tool_choice != null || body.function_call != null) return "existing-tools";
+  if (body.functions?.length || body.function_call != null) return "existing-tools";
+  // Client tools stay callable next to the transport tool; a forced choice asks for a call, not text.
+  if (body.tool_choice != null && body.tool_choice !== "auto" && body.tool_choice !== "none") return "tool-choice";
+  if (body.tools != null && (!Array.isArray(body.tools) || !body.tools.every(nativeTool))) return "tool-schema";
   if (body.json_schema || body.responseSchema || (body.responseMimeType && body.responseMimeType !== "text/plain") ||
       (body.response_format && body.response_format.type !== "text")) return "structured-output";
   if ((body.n != null && body.n !== 1) || (body.best_of != null && body.best_of !== 1)) return "multiple-candidates";
   if (body.enable_web_search) return "web-search";
   if (body.request_images) return "image-generation";
-  if (Array.isArray(body.messages) && body.messages.some(message => message?.role === "tool" || message?.role === "function" ||
-      message?.tool_calls?.length || message?.function_call || message?.tool_call_id ||
-      (Array.isArray(message?.content) && message.content.some(part => part?.type === "tool_calls" || part?.type === "tool_call_id")))) return "tool-history";
+  if (Array.isArray(body.messages) && body.messages.some(message => message?.role === "function" || message?.function_call)) return "tool-history";
   return null;
 }
 
@@ -76,6 +94,7 @@ export function createFetchInterceptor(originalFetch, { origin, getMode, getUnic
       } catch (error) { onStatus({ error: error.code || "unicode_input_failed" }); throw error; }
     }
     let reason = bypassReason(body, imageEnabled && mode === "off" ? "buffered" : mode);
+    if (!reason && !direct && usesTools(body) && !await ensureBackend(TOOLS_FEATURE)) reason = "server-tools";
     if (imageEnabled) {
       if (!["current-turn", "all"].includes(imageMode) || reason) { onStatus({ error: "image_input_requires_supported_request", bypass: reason }); throw new Error("image_input_requires_supported_request"); }
       body.vertex_image_input = imageMode;

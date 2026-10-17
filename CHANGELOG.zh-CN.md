@@ -2,6 +2,16 @@
 
 中文 | [English](CHANGELOG.md)
 
+## 独立网关 0.9.0 与 SillyTavern 集成 0.5.0 — 客户端工具与抗截断共用
+
+标签 `gateway-v0.9.0`（Docker 镜像 `0.9.0`）与 `sillytavern-v0.5.0`（一键安装包）位于同一提交。酒馆插件请前后端一起更新；服务端插件较旧时，带工具的请求走酒馆原流程。
+
+- **网关**：带客户端工具（`tool_choice` 省略或为 `auto`）或工具历史的请求不再跳过，而是照常包装。随机命名的合成工具排在客户端工具之后，`tool_choice` 改为 `required`，客户端的 `parallel_tool_calls` 保留，末尾说明改为“正文放进合成工具，其他工具按需调用”。真实工具调用与还原后的正文一起交给客户端，结束原因保持 `tool_calls`；流式中真实调用的 index 从 0 连续编号。`tool_choice: "none"` 时客户端工具仍声明但强制合成工具。强制的 `tool_choice`（`required` 或指定函数）、旧版 `functions`/`function_call`/`role: function`、结构化输出和多候选仍跳过包装。原生参数流只承载合成工具，带客户端工具或工具历史的流式请求改走缓冲回退（`tool-transport-buffered-fields`）；Express 和 Flex 下是整段函数调用的原生流。
+- **酒馆服务端插件**：酒馆注册的函数工具和工具调用历史也经抗截断传输。工具历史沿用酒馆自己的提示词转换；工具定义转成原生声明，排在合成工具之前。真实调用以 Gemini `functionCall` 片段交回酒馆，带思考签名（Gemini 4 Argon 另带原生调用 ID），并单独成一个事件，因为酒馆的流式读取会忽略带调用事件里的正文。流式模式下这类请求不逐段读取函数参数，正文在模型写完后一次到达，思考过程仍逐步显示。参数 Schema 无法转成原生声明的工具（如含 `default`、`pattern`）、非函数工具、强制工具选择和旧版 functions 仍走酒馆原流程。
+- **扩展**：服务端状态新增 `features: ["client-tools"]`。没有这项时，带工具的请求走酒馆原流程，面板提示服务端插件较旧；其他请求不受影响。安装包里的扩展新增 `src/vertex-schema.mjs` 与 `src/wire.mjs`，用于 Schema 检查。TauriTavern 中带工具的请求走它的原流程，因为它的后台如何处理工具历史尚未核对。
+- 控制台日志标签改为说明 `existing-tools`、`tool-history` 指旧版 functions。
+- 验证：本地 215 项测试和 115 个发布文件检查通过；本地 Docker 镜像通过独立 Compose 冒烟测试；离线用酒馆 1.19.0 自己的提示词转换器，把带签名和不带签名的工具历史（Gemini 3.7 Flash 与 Gemini 4 Argon）转成了预期的原生请求。本次发布没有发送真实 Vertex 请求。
+
 ## 独立网关 0.8.0 — Docker 部署
 
 - 发布基于 Node 24 的 amd64/arm64 Linux 镜像到 GHCR，提供 `latest`、`0.8.0` 和提交标签；默认 Compose 直接拉取镜像，`compose.build.yaml` 支持源码构建。包含网页控制台、持久化配置卷、非 root 运行、只读根文件系统和本地健康检查。

@@ -7,7 +7,7 @@ import { upstreamDispatcher } from "../../src/gateway.mjs";
 import { prepareSillyTavernRequest, restoreSillyTavernResponse, requestError } from "../../src/sillytavern.mjs";
 import { sseData } from "../../src/wire.mjs";
 import { waitWithSignal } from "../../src/abort.mjs";
-import { BODY_LIMIT, PLUGIN_ID, PLUGIN_VERSION } from "./shared.js";
+import { BODY_LIMIT, PLUGIN_FEATURES, PLUGIN_ID, PLUGIN_VERSION } from "./shared.js";
 
 export const info = { id: PLUGIN_ID, name: "Vertex AI Anti-Truncation", description: "Native Vertex text transport using SillyTavern's saved credentials." };
 
@@ -108,7 +108,7 @@ export async function init(router) {
   router.get("/status", (request, response) => {
     response.setHeader("cache-control", "no-store");
     if (!request.user?.directories) return response.sendStatus(401);
-    response.json({ id: PLUGIN_ID, version: PLUGIN_VERSION, ready: true });
+    response.json({ id: PLUGIN_ID, version: PLUGIN_VERSION, ready: true, features: PLUGIN_FEATURES });
   });
   router.post("/generate", createGenerateHandler(adapters));
 }
