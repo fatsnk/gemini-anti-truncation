@@ -2,9 +2,9 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
-## Unreleased — custom upstream and cost estimates for the standalone gateway
+## Standalone gateway 0.10.0 — custom upstream and cost estimates
 
-Changes on `main`; the gateway version stays 0.9.1. Standalone gateway only; the SillyTavern plugin is unchanged (its server package gains an unused `src/pricing.mjs`).
+Tag `gateway-v0.10.0` (Docker image `0.10.0`). Standalone gateway only; the SillyTavern integration stays at 0.5.1 with unchanged code, and a Git-installed server plugin gains an unused `src/pricing.mjs`.
 
 - The request log gains a usage / estimated cost column: each record carries `usage` (input, its cached part, output including thinking) and an `estimatedCostUsd` from Google's list prices built into the gateway. Prices were checked on 2026-10-17 against the Vertex generative AI pricing page. The estimate picks promotional or regular prices by request date, applies the tier the upstream reports (Priority ×1.8, Flex ×0.5), adds 10% for Gemini 3+ outside `global`, and uses long-context rates for 2.5 Pro and 3.1 Pro Preview above 200K input tokens. Custom upstreams, Provisioned Throughput and models missing from the table are not estimated.
 - To get usage for streamed replies, the gateway adds `stream_options.include_usage` to compatible-endpoint streams it requests from Vertex; when the client did not ask for usage, that chunk is not forwarded. Custom upstreams are not asked for it.
