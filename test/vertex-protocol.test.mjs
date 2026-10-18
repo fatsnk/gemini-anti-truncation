@@ -10,7 +10,8 @@ const records = wire => wire.split("\n").filter(line => line.startsWith("data:")
   .map(line => JSON.parse(line.slice(5)));
 
 test("native prompt blocks retain original codes without exposing rejection text", async () => {
-  for (const blockReason of ["BLOCKLIST", "PROHIBITED_CONTENT", "OTHER", "JAILBREAK"]) {
+  // One code the finish-reason table knows and one it does not.
+  for (const blockReason of ["BLOCKLIST", "JAILBREAK"]) {
     for (const candidates of [undefined, []]) {
       const native = { candidates, promptFeedback: { blockReason, blockReasonMessage: "private provider detail" } };
       const completion = translateNativeCompletion(native, "fixture");

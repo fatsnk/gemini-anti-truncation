@@ -48,6 +48,8 @@ test("Gemini 4 text prefills follow the opt-in conversion and preserve tool hist
 test("Gemini 4 opaque tool IDs retain call identity and signature", () => {
   const id = encodeGemini4ToolId({ functionCall: { id: "function-42" }, thoughtSignature: "fixture-signature" });
   assert.deepEqual(gemini4ToolMetadata(id), { id: "function-42", signature: "fixture-signature" });
-  assert.equal(gemini4ToolMetadata("vtx.old-signature").id, gemini4ToolMetadata("vtx.old-signature").id);
+  const legacy = gemini4ToolMetadata("vtx.old-signature");
+  assert.match(legacy.id, /^call_[0-9a-f]{24}$/);
+  assert.equal(legacy.signature, "old-signature");
   assert.throws(() => gemini4ToolMetadata("vtx4.invalid"), { code: "invalid_tool_history" });
 });

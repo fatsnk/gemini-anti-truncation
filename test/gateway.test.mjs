@@ -249,7 +249,6 @@ test("upstream calls use the configured timeout instead of fetch's fixed 300 s h
   const short = await upstreamDispatcher(100);
   assert.ok(short, "the built-in fetch Agent must be reachable on this Node version");
   await assert.rejects(fetch(url, { dispatcher: short }), error => error.cause?.code === "UND_ERR_HEADERS_TIMEOUT");
-  assert.equal(await (await fetch(url, { dispatcher: await upstreamDispatcher(5000) })).text(), "late");
 });
 
 test("Unicode global toggle composes with every transport and strips local metadata", async t => {

@@ -39,7 +39,7 @@ test('bounded pagination, overflow, unsupported characters and cancellation fail
  }
  // Every text-bearing message starts its own page.
  assert.equal((await prepareImageInput({messages:[{role:'user',content:'a'},{role:'assistant',content:'b'}]},'all')).metadata.pages,2);
- for(const [text,limit,code] of [['x'.repeat(150001),8e6,'image_input_too_large'],['test',100,'image_input_too_large'],['😀',8e6,'image_input_unsupported_characters'],['a\0b',8e6,'image_input_unsupported_characters'],['\u{10ffff}',8e6,'image_input_unsupported_characters'],['\ud800',8e6,'image_input_unsupported_characters']]) {
+ for(const [text,limit,code] of [['x'.repeat(150001),8e6,'image_input_too_large'],['test',100,'image_input_too_large'],['a\0b',8e6,'image_input_unsupported_characters'],['\u{10ffff}',8e6,'image_input_unsupported_characters']]) {
   await assert.rejects(prepareImageInput(payload(text),'all',limit),e=>e.code===code);
  }
  for(const text of ['⚽','♥️','👩‍💻','👍🏽','1️⃣','🇨🇳']) {

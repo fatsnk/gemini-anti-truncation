@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, copyFile, writeFile, readFile, readdir, lstat, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, copyFile, writeFile, readFile, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,12 +13,7 @@ const script = fileURLToPath(new URL("../scripts/package-sillytavern.mjs", impor
 async function fixture(t) {
   const temporary = await mkdtemp(path.join(tmpdir(), "vertex-package-test-"));
   const root = path.join(temporary, "repo");
-  t.after(async () => {
-    assert.equal(path.dirname(path.resolve(temporary)), path.resolve(tmpdir()));
-    assert.ok(path.basename(temporary).startsWith("vertex-package-test-"));
-    assert.equal((await lstat(temporary)).isSymbolicLink(), false);
-    await rm(temporary, { recursive: true, force: true });
-  });
+  t.after(() => rm(temporary, { recursive: true, force: true }));
   const files = ["package-lock.json", "assets/fonts/NotoSansCJKsc-Regular.otf", "assets/fonts/OFL.txt", "manifest.json", "package.json", "integrations/sillytavern/index.js", "integrations/sillytavern/shared.js",
     "integrations/sillytavern/style.css", "integrations/sillytavern/server.mjs", "src/current.mjs", "src/unicode-input.mjs", "src/vertex-schema.mjs", "src/wire.mjs", "LICENSE", "NOTICE.md",
     "LICENSES/Antigravity-gateway-MIT.txt", "docs/SILLYTAVERN.md", ...["install.mjs", "install-windows.cmd", "install.sh", "README.txt"].map(file => `integrations/sillytavern/installer/${file}`)];

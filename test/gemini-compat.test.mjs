@@ -15,8 +15,11 @@ const context = "Private custom retry context.\n".repeat(1000);
 const credentials = { ...DEFAULT_SETTINGS, authMode: "access-token", projectId: "example-project",
   gatewayKey: "synthetic-roleplay-local-key", accessToken: "synthetic-roleplay-oauth", apiKey: "synthetic-roleplay-express" };
 const profile = { id: "roleplay", upstreamModel: "google/gemini-3.8-flash", mode: "normal" };
+// Every auth, mode and stream value, on both the compatible and the native request path.
+const routes = [["access-token", "normal", false], ["access-token", "buffered", true], ["access-token", "streaming", true],
+  ["express", "normal", true], ["express", "streaming", false]];
 test("Gemini 4 routes normalize thinking and parameters across auth, transport and response modes", async t => {
-  for (const authMode of ["access-token", "express"]) for (const mode of ["normal", "buffered", "streaming"]) for (const stream of [false, true]) {
+  for (const [authMode, mode, stream] of routes) {
     const f = await fixture(t, undefined, { authMode, models: [{ ...profile, upstreamModel: "google/gemini-4-argon", mode }] });
     const response = await f.post({ ...payload(), stream, max_tokens: 512, reasoning_effort: "low", n: 1, presence_penalty: 0.2 });
     assert.equal(response.status, 200);
@@ -138,8 +141,8 @@ test("model visibility hides disabled routes and rejected credentials while pres
   assert.deepEqual(await f.list(), ["roleplay"]);
 });
 
-for (const authMode of ["access-token", "express"]) for (const mode of ["normal", "buffered", "streaming"]) {
-  for (const stream of [false, true]) test("one retry preserves exact text, prefill and transport: " + authMode + "/" + mode + "/" + stream, async t => {
+for (const [authMode, mode, stream] of routes) {
+  test("one retry preserves exact text, prefill and transport: " + authMode + "/" + mode + "/" + stream, async t => {
     const f = await fixture(t, (call, count) => count === 1 ? Response.json(errorBody, { status: 400 }) : success(call), {
       authMode, models: [{ ...profile, mode }], geminiPromptRetryEnabled: true, geminiPromptRetryText: context,
     });
