@@ -20,8 +20,12 @@ export function antiTruncationLogFields(metadata) {
     } };
 }
 
+// Tool declarations precede the prompt, so the synthetic tool keeps one name and one
+// description; otherwise no two requests share a prefix for Vertex implicit caching.
+const TOOL_NAME = "router_emit";
+
 // Opt-in transport for text replies. Client tools and tool history stay usable next to
-// the randomly named synthetic tool. A forced tool choice (no text reply expected, e.g.
+// the synthetic tool. A forced tool choice (no text reply expected, e.g.
 // Tavern Helper's own transport), the legacy functions API, structured output and
 // multi-candidate requests bypass it.
 export function prepareAntiTruncation(payload, enabled, streamArguments = false, { continuation = false, native = true } = {}) {
@@ -38,7 +42,13 @@ export function prepareAntiTruncation(payload, enabled, streamArguments = false,
     // The native stream only carries the synthetic text call; client tools, and upstreams
     // without Vertex's native API, use the fallback.
     const nativeStreaming = requested && native && !clientTools.length && supportsNativeTextStream(payload);
-    const toolName = "router_emit_" + Array.from(crypto.getRandomValues(new Uint8Array(12)), byte => byte.toString(16).padStart(2, "0")).join("");
+    // Restoration claims calls by name, and a streamed name as soon as its fragments spell the
+    // synthetic one, so a client tool named router_emit or router_emit... would be swallowed.
+    // Such a request takes a random name instead and only loses caching; "router_" plus hex
+    // cannot start with router_emit, since "m" is not a hex digit.
+    const toolName = clientTools.some(tool => typeof tool?.function?.name === "string" && tool.function.name.startsWith(TOOL_NAME))
+        ? "router_" + Array.from(crypto.getRandomValues(new Uint8Array(12)), byte => byte.toString(16).padStart(2, "0")).join("")
+        : TOOL_NAME;
     // Callable client tools turn the forced synthetic call into "call some tool": the text
     // goes through the synthetic one, real calls pass through. "none" keeps them uncallable.
     const callable = clientTools.length > 0 && payload.tool_choice !== "none";
@@ -58,7 +68,7 @@ export function prepareAntiTruncation(payload, enabled, streamArguments = false,
             }],
             tools: [...clientTools, { type: "function", function: {
                 name: toolName,
-                description: continuation ? "Deliver only the new continuation text to append to the existing message." : "Deliver the complete user-visible reply as text.",
+                description: "Deliver the user-visible reply as text.",
                 parameters: { type: "object", properties: { content: { type: "string" } }, required: ["content"], additionalProperties: false },
             } }],
             tool_choice: callable ? "required" : { type: "function", function: { name: toolName } },

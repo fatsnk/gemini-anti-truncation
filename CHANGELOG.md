@@ -2,6 +2,17 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
+## Standalone gateway 0.10.2 and SillyTavern integration 0.5.3 — anti-truncation requests can hit the Vertex cache
+
+Tags `gateway-v0.10.2` (Docker image `0.10.2`) and `sillytavern-v0.5.3` (one-step package) share this fix.
+
+- The synthetic anti-truncation tool is now always named `router_emit` instead of a fresh random name per request (`router_emit_` plus 24 hex digits). Tool declarations come before the prompt, so a changing name made every request start differently: Vertex implicit caching never matched, and character settings and chat history were billed at full price every turn. This affects the standalone gateway, the SillyTavern server plugin and the TauriTavern adaptation.
+- Continue no longer switches to a different tool description; only the final instruction differs, so it shares the cache with ordinary requests.
+- Since 0.9.0 client tools are declared next to the synthetic tool. If a client tool's name starts with `router_emit`, that request uses a random name (`router_` plus 24 hex digits) so its real calls are not taken for the synthetic one; only that request misses the cache.
+- Live comparison in an isolated SillyTavern (Gemini 4 Argon, Standard, `global`, a real preset prompt and a constructed next turn): with anti-truncation off, the next turn reused 49.7% of the prompt (17,265 of 34,713 tokens); with streaming anti-truncation and a fixed name, 49.7% (17,315 of 34,810); with 0.5.2's random names, 0. That run used an earlier build of this fix on 0.8.0 with the same name and description; the 0.10.2 / 0.5.3 code has not been sent to a live model.
+- Update the half that actually runs: the server plugin in SillyTavern (a Git install updates itself when Tavern starts), the extension in TauriTavern, or the gateway source or image.
+- Validation: 219 offline tests passed, including a new one for a client tool named `router_emit` or `router_emit_v2` in buffered and streamed replies.
+
 ## Standalone gateway 0.10.1 and SillyTavern integration 0.5.2 — Express global routing
 
 Tags `gateway-v0.10.1` (Docker image `0.10.1`) and `sillytavern-v0.5.2` (one-step package) share this fix.

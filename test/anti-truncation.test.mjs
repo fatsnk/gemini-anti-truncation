@@ -37,10 +37,13 @@ test("opt-in preparation preserves parameters and isolates the original request"
   assert.equal(prepared.payload.custom, payload.custom);
   assert.equal(prepared.payload.reasoning, payload.reasoning);
   assert.equal(prepared.payload.temperature, payload.temperature);
-  assert.match(prepared.toolName, /^router_emit_[a-f0-9]{24}$/);
+  assert.equal(prepared.toolName, "router_emit");
   assert.equal(prepared.payload.tools.length, 1);
   assert.equal(prepared.payload.tool_choice.function.name, prepared.toolName);
-  assert.notEqual(prepareAntiTruncation(payload, true).toolName, prepared.toolName);
+  // Repeated, streamed and Continue requests declare identical tools, keeping Vertex's implicit-cache prefix.
+  for (const again of [prepareAntiTruncation(payload, true), prepareAntiTruncation({ ...payload, stream: true }, true, true, { continuation: true })]) {
+    assert.deepEqual([again.payload.tools, again.payload.tool_choice], [prepared.payload.tools, prepared.payload.tool_choice]);
+  }
   assert.equal(prepareAntiTruncation(payload, false).payload, payload);
 });
 
@@ -95,6 +98,27 @@ test("client tools stay callable beside the synthetic tool, and tool history is 
     assert.equal(prepared.payload.parallel_tool_calls, false);
     assert.equal(prepared.payload.tools.length, (request.tools?.length ?? 0) + 1);
     assert.match(prepared.payload.messages.at(-1).content, /exactly once/);
+  }
+});
+
+test("a client tool named like the synthetic tool keeps its calls, buffered and streamed", async () => {
+  for (const clientName of ["router_emit", "router_emit_v2"]) {
+    const tools = [{ type: "function", function: { name: clientName } }];
+    const prepared = prepareAntiTruncation({ ...payload, tools }, true);
+    assert.match(prepared.toolName, /^router_[a-f0-9]{24}$/);
+    assert.deepEqual(prepared.payload.tools.map(tool => tool.function.name), [clientName, prepared.toolName]);
+    const real = { ...call("{}", clientName, 1), id: "call-real" };
+    const completion = restoreAntiTruncationCompletion({ choices: [{ finish_reason: "tool_calls",
+      message: { role: "assistant", content: null, tool_calls: [call(JSON.stringify({ content: "text" }), prepared.toolName), real] } }] }, prepared.toolName);
+    assert.equal(completion.choices[0].message.content, "text");
+    assert.deepEqual(completion.choices[0].message.tool_calls, [real]);
+    // The client name arrives in pieces, the first of which spells router_emit.
+    const pieces = [{ index: 0, id: "call-real", type: "function", function: { name: "router_emit", arguments: "" } },
+      ...(clientName === "router_emit" ? [] : [{ index: 0, function: { name: clientName.slice(11) } }]), { index: 0, function: { arguments: "{}" } }];
+    const body = [...pieces.map(piece => event(chunk({ tool_calls: [piece] }))), event(chunk({}, "tool_calls")), event("[DONE]")].join("");
+    const records = parse(await wrapAntiTruncationStream(new Response(body), prepared.toolName).text());
+    assert.deepEqual(records.flatMap(record => record.choices[0].delta.tool_calls ?? []), pieces);
+    assert.equal(records.at(-1).choices[0].finish_reason, "tool_calls");
   }
 });
 
