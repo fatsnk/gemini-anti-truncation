@@ -3,7 +3,8 @@ import { buildConnectionConfig } from "../../src/config.mjs";
 import { prepareImageInput } from "../../src/image-input.mjs";
 import { buildNativeUrl } from "../../src/vertex-native.mjs";
 import { parseServiceAccount } from "../../src/vertex-auth.mjs";
-import { validateGemini4Connection } from "../../src/gemini4.mjs";
+import { outputLimitHeaders, validateGemini4Connection } from "../../src/gemini4.mjs";
+import { fetchLongDecode, longDecodeUrl } from "../../src/vertex-long-decode.mjs";
 import { upstreamDispatcher } from "../../src/gateway.mjs";
 import { prepareSillyTavernRequest, restoreSillyTavernResponse, requestError } from "../../src/sillytavern.mjs";
 import { sseData } from "../../src/wire.mjs";
@@ -60,10 +61,13 @@ export function createGenerateHandler(adapters, { fetchImpl = fetch, timeoutMs =
       stage = "upstream";
       const dispatcher = await waitWithSignal(() => upstreamDispatcher(timeoutMs), signal);
       signal.throwIfAborted();
-      const upstream = await fetchImpl(buildNativeUrl(config.baseUrl, prepared.model, prepared.upstreamStream), {
-        method: "POST", headers, body: JSON.stringify(prepared.body), signal, redirect: "error",
+      const longDecode = prepared.outputLimit?.longDecode === true;
+      const url = buildNativeUrl(config.baseUrl, prepared.model, prepared.upstreamStream);
+      const post = body => fetchImpl(longDecode ? longDecodeUrl(url) : url, {
+        method: "POST", headers, body: JSON.stringify(body), signal, redirect: "error",
         dispatcher,
       });
+      const upstream = await (longDecode ? fetchLongDecode(post, prepared.body, prepared.upstreamStream) : post(prepared.body));
       stage = "restoration";
       const restored = await restoreSillyTavernResponse(upstream, prepared);
       // ST's global compression() would hold SSE chunks until the reply ends; no-transform opts out.
@@ -71,6 +75,7 @@ export function createGenerateHandler(adapters, { fetchImpl = fetch, timeoutMs =
       response.setHeader("x-content-type-options", "nosniff");
       response.setHeader("x-anti-truncation-transport", prepared.upstreamStream ? "native-streaming" : "buffered");
       if (prepared.continuation) response.setHeader("x-vertex-continuation", "suffix");
+      for (const [name, value] of Object.entries(outputLimitHeaders(prepared.outputLimit))) response.setHeader(name, value);
       response.setHeader("content-type", restored.headers.get("content-type"));
       if (prepared.stream) response.setHeader("x-accel-buffering", "no");
       for await (const bytes of restored.body) {

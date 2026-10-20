@@ -29,7 +29,7 @@ https://raw.githubusercontent.com/ken050210/vertex-streaming-anti-truncation/mai
 
 实验版，支持配置多个 Gemini 模型；默认保留 Gemini 3.7 Flash 的原有入口。模型与流式参数功能是否可用取决于上游。独立网关和 SillyTavern 服务端插件需要 Node.js 22.9+（TauriTavern 适配版不需要 Node.js），图片输入使用 @napi-rs/canvas 与随附的 Noto CJK 字体。
 
-已适配 **Gemini 4 Argon**（`gemini-4-argon`）：支持三种传输版本，处理思考等级、采样参数和预填充兼容；[添加方式、Express 快速 key、自定义上游的范围与长解码限制](docs/GEMINI4.md)。酒馆插件部分随 SillyTavern 集成 0.4.0（`sillytavern-v0.4.0`）发布；独立网关部分随网关 0.8.0 发布，支持源码和 Docker 部署。
+已适配 **Gemini 4 Argon**（`gemini-4-argon`）：支持三种传输版本，处理思考等级、采样参数和预填充兼容；[添加方式、Express 快速 key、自定义上游的范围，以及输出上限与可选的自动续写](docs/GEMINI4.md)。酒馆插件部分随 SillyTavern 集成 0.4.0（`sillytavern-v0.4.0`）发布；独立网关部分随网关 0.8.0 发布，支持源码和 Docker 部署。
 
 也提供 **SillyTavern 原生 Vertex 面板集成**：UI 扩展与服务端插件配套安装后，直接在 Google Vertex AI 连接面板选择关闭、非流式或流式抗截断，复用酒馆凭据，无需另开网关进程。默认关闭；[安装与验证说明](docs/SILLYTAVERN.md)。
 
@@ -232,6 +232,7 @@ NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://127.0.0.1:7890 NO_PROXY=127.0.0.1,localh
 | 隐藏无可用路由的模型 | 开启 | `/v1/models` 隐藏停用版本及已知鉴权失败的连接；临时错误不影响显示 |
 | Gemini 3.7 / 3.8 Flash 预填充转 USER | 开启 | 在抗截断包装前，把末尾纯文本 `assistant` 消息改为 `user`，原文不变 |
 | 提示词提交失败重试 | 关闭 | 先在 GUI 填入自定义文本，启用后仅对匹配规则（默认一条）的提交错误追加一次请求 |
+| Gemini 4 Argon 超长回复自动续写 | 关闭 | 关闭时，超过单次上限（流式 65,536、非流式 32,768 token）的输出额度按单次上限发送，不再报错；开启后回复写满单次上限时用 Google 的 long decode 续写。行为与兼容性风险见 [Gemini 4 输出上限与自动续写](docs/GEMINI4.md#输出上限与自动续写) |
 
 独立网关共用一套上游连接。模型页面的“启用”开关可以停用版本并保留名称和配置；停用版本即使因关闭隐藏而显示，也不能调用。上游返回 HTTP 401 后，该连接的版本会被隐藏。修正凭据后保存应用、重启，或下一次直接调用成功，会清除这项观察。HTTP 403/404/429、超时和 5xx 不用于隐藏模型，也不会主动发起推理探测。目录不能保证 Google 项目拥有某个模型的调用权限。
 
@@ -241,7 +242,7 @@ Google 的 [Gemini 3.7 Flash](https://docs.cloud.google.com/gemini-enterprise-ag
 
 自定义文本建议自行准备约 7000 tokens；页面计数只是粗估，未调用 Google tokenizer。文本最多 192000 UTF-8 字节，按原样插入到开头连续的 `system` / `developer` 消息之后、其余对话之前，不补齐、不重复、不截断。每个客户端请求最多重试一次，保持同一模型、凭据和服务等级；请求取消、超出大小限制或输出已开始时不会重试。第二次仍失败就结束。此功能可能增加输入费用、上下文占用和等待时间，不保证提交成功。
 
-日志仅增加 `geminiCompatibility.prefillConverted` / `promptRetried` 两个布尔值，GUI 显示转换和重试标记；不记录自定义文本。响应头为 `x-gemini-prefill-converted` / `x-gemini-prompt-retried`。仅命令行模式使用 `HIDE_UNAVAILABLE_MODELS`、`GEMINI_PREFILL_TO_USER`、`GEMINI_PROMPT_RETRY_ENABLED`、指向仓库之外 UTF-8 文本文件的 `GEMINI_PROMPT_RETRY_TEXT_FILE`，以及用 `|` 分隔多条规则的 `GEMINI_PROMPT_RETRY_MATCHES`。
+日志仅增加 `geminiCompatibility.prefillConverted` / `promptRetried` 两个布尔值，GUI 显示转换和重试标记；不记录自定义文本。响应头为 `x-gemini-prefill-converted` / `x-gemini-prompt-retried`。仅命令行模式使用 `HIDE_UNAVAILABLE_MODELS`、`GEMINI_PREFILL_TO_USER`、`GEMINI_LONG_DECODE`、`GEMINI_PROMPT_RETRY_ENABLED`、指向仓库之外 UTF-8 文本文件的 `GEMINI_PROMPT_RETRY_TEXT_FILE`，以及用 `|` 分隔多条规则的 `GEMINI_PROMPT_RETRY_MATCHES`。
 
 ### 模型不支持的参数与上游超时
 

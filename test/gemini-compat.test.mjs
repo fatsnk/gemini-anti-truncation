@@ -40,15 +40,21 @@ test("Gemini 4 routes normalize thinking and parameters across auth, transport a
   }
 });
 
-test("Gemini 4 invalid budgets, caches and buffered long output fail before any submission", async t => {
+test("Gemini 4 invalid budgets and caches fail before any submission; buffered long output is capped", async t => {
   const f = await fixture(t, undefined, { models: [{ ...profile, upstreamModel: "google/gemini-4-argon", mode: "buffered" }] });
   for (const patch of [{ extra_body: { google: { thinking_config: { thinking_budget: 100 } } } },
-    { extra_body: { google: { cached_content: "fixture" } } }, { max_tokens: 32769, stream: true }]) {
+    { extra_body: { google: { cached_content: "fixture" } } }]) {
     const response = await f.post({ ...payload(), ...patch });
     assert.equal(response.status, 400);
     assert.match((await response.json()).error.code, /gemini4/);
   }
   assert.equal(f.calls.length, 0);
+  // Buffered anti-truncation sends one unary request even when the client streams.
+  const response = await f.post({ ...payload(), max_tokens: 32769, stream: true });
+  assert.equal(response.status, 200);
+  await response.text();
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].body.max_tokens, 32768);
 });
 const payload = () => ({ model: profile.id, messages: [{ role: "system", content: "System rules" },
   { role: "developer", content: "Developer rules" }, { role: "user", content: "Start" },

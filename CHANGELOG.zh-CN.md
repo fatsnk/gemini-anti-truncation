@@ -2,6 +2,16 @@
 
 中文 | [English](CHANGELOG.md)
 
+## 未发布 — Gemini 4 Argon 输出上限与可选的自动续写
+
+`main` 上的改动，版本号仍为独立网关 0.10.2、酒馆集成 0.5.3。涉及独立网关、酒馆服务端插件与前端扩展，以及 TauriTavern 适配。
+
+- Gemini 4 Argon 的输出额度超过单次上限时，不再返回 `gemini4_long_decode_required`，改按实际发给 Google 的那次请求的上限发送：流式 65,536，否则 32,768（缓冲抗截断、酒馆测试消息与后台生成、图片输入都是非流式）。自定义上游一律 32,768，TauriTavern 一律 65,536；插件不接管、交给酒馆原流程的请求不改动；预设不会被改写。响应头 `x-gemini-output-tokens-requested`、`x-gemini-output-tokens-applied`、`x-gemini-long-decode`，网关日志 `outputLimit` 和酒馆面板会说明本次实际额度。
+- 新增可选项“Gemini 4 Argon 超长回复自动续写”（long decode），默认关闭：独立网关控制台（仅命令行模式用 `GEMINI_LONG_DECODE`）和酒馆 Vertex 面板各一个。开启后，超过单次上限的 Argon 请求改用原生 `v1beta1` 接口；Google 以 `CONTINUATION` 结束时，带续写令牌重发同一请求，直到 Google 正常结束，再拼成一条回复，用量逐次相加。只有回复真的写超单次上限才会追加请求。网关平时走兼容接口的请求，在原生接口能无损表达时改走原生接口；自定义上游的额度原样转发。TauriTavern 不可用。
+- 自动续写的已知风险写在 [Gemini 4 说明](docs/GEMINI4.md#输出上限与自动续写)：抗截断跨请求续写未经真实超长输出验证；Express、Flex、Priority 在 `v1beta1` 上未验证；每续写一段都会重发完整上下文并计费；整次请求仍受上游超时限制；中途失败时流式以错误事件结束，非流式整条报错。
+- 旧版酒馆服务端插件仍返回 `gemini4_long_decode_required` 时，面板会提示更新。
+- 原生参数流也接受 Google 示例中的字符串结束片段：只有 `jsonPath`、没有值，前提是正文已经开始。缺值、其他类型的值和位置不对的结束片段仍然报错。独立网关、酒馆插件和 TauriTavern 共用这段解析代码。
+- 验证：237 项离线测试通过，包括模拟的多次续写。3 条真实短请求（服务账号、Standard、global）确认 `v1beta1` 的流式和非流式 Argon 请求接受 100,000 的额度并一次完成，关闭续写时按 32,768 发送的缓冲请求也成功。没有真实测试跨请求的续写。
 ## 独立网关 0.10.2 与酒馆集成 0.5.3 — 开启抗截断也能命中 Vertex 缓存
 
 标签为 `gateway-v0.10.2`（Docker 镜像 `0.10.2`）与 `sillytavern-v0.5.3`（一键安装包）。

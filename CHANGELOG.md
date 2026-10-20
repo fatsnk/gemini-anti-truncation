@@ -2,6 +2,16 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
+## Unreleased — Gemini 4 Argon output limits and optional long decode
+
+Changes on `main`; versions stay at standalone gateway 0.10.2 and SillyTavern integration 0.5.3. Affects the standalone gateway, the Tavern server plugin and UI extension, and the TauriTavern adaptation.
+
+- Gemini 4 Argon output limits above one request's maximum no longer fail with `gemini4_long_decode_required`. They are sent as the maximum of the request actually made to Google: 65,536 when it streams, otherwise 32,768 (buffered anti-truncation, Tavern's connection test and background generations, image input). A custom upstream always gets 32,768 and TauriTavern 65,536. Requests the Tavern plugin leaves to Tavern's own route are unchanged, and saved presets are not modified. The `x-gemini-output-tokens-requested`, `x-gemini-output-tokens-applied` and `x-gemini-long-decode` headers, the gateway log's `outputLimit` and the Tavern panel report the limit sent.
+- New opt-in "Gemini 4 Argon 超长回复自动续写" (long decode), off by default, in the gateway console (`GEMINI_LONG_DECODE` in CLI mode) and the Tavern Vertex panel. Argon requests over the single-request limit then use the native `v1beta1` API. When Google ends a request with `CONTINUATION`, the request is sent again with its continuation token until Google finishes, and the parts are joined into one reply with usage added up. Requests are added only when a reply actually exceeds the limit. On the gateway, compatible-endpoint requests switch to the native API when it can carry them; a custom upstream gets the client's limit unchanged. Not available in TauriTavern.
+- Known long-decode risks are listed in [Gemini 4](docs/GEMINI4.en.md#output-limits-and-long-decode): anti-truncation across continued requests is untested with real long replies; Express, Flex and Priority on `v1beta1` are untested; each continuation resends and bills the full context; the whole request stays within the upstream timeout; a failure midway ends a stream with an error event and fails a unary reply.
+- When an older Tavern server plugin still returns `gemini4_long_decode_required`, the panel asks to update it.
+- Native argument streams also accept the string terminator shown in Google's example: a fragment with only `jsonPath` and no value, once the text has started. Missing values, other value types and misplaced terminators still fail. The standalone gateway, the Tavern plugin and TauriTavern share this parser.
+- Validation: 237 offline tests passed, including simulated multi-request continuations. Three short live requests (service account, Standard, `global`) confirmed that streamed and unary `v1beta1` Argon requests accept a 100,000 limit and finish in one request, and that a buffered request capped at 32,768 succeeds. No reply that continues across requests was tested live.
 ## Standalone gateway 0.10.2 and SillyTavern integration 0.5.3 — anti-truncation requests can hit the Vertex cache
 
 Tags `gateway-v0.10.2` (Docker image `0.10.2`) and `sillytavern-v0.5.3` (one-step package) share this fix.

@@ -7,7 +7,7 @@ import { completionStream } from "./completion-stream.mjs";
 import { documentedUnsupported } from "./unsupported-params.mjs";
 import { isObject, protocolError, sseData, transformSse } from "./wire.mjs";
 import { bypassReason, BODY_LIMIT } from "../integrations/sillytavern/shared.js";
-import { isGemini4Argon, gemini4ThinkingLevel, gemini4ToolMetadata, validateGemini4Output } from "./gemini4.mjs";
+import { isGemini4Argon, gemini4OutputLimit, gemini4ThinkingLevel, gemini4ToolMetadata } from "./gemini4.mjs";
 
 export const requestError = code => Object.assign(new Error(code), { status: 400, code });
 
@@ -74,10 +74,11 @@ export function prepareSillyTavernRequest(request, adapters) {
     else if (typeof budget === "string" && budget) config.thinkingConfig.thinkingLevel = budget;
   }
   const upstreamStream = mode === "streaming" && body.stream === true && !(body.vertex_image_input && body.vertex_image_input !== "off");
-  validateGemini4Output(body, body.model, upstreamStream);
+  const outputLimit = gemini4OutputLimit(config.maxOutputTokens, body.model, { stream: upstreamStream, longDecode: body.vertex_long_decode === true });
+  if (outputLimit) config.maxOutputTokens = outputLimit.applied;
   // Streamed arguments are read only for the transport call alone; client tools arrive whole.
   if (upstreamStream && !clientTools) native.toolConfig.functionCallingConfig.streamFunctionCallArguments = true;
-  return { body: native, toolName: prepared.toolName, model: body.model, stream: body.stream === true, upstreamStream, mode, continuation, clientTools, tools: prepared.payload.tools };
+  return { body: native, toolName: prepared.toolName, model: body.model, stream: body.stream === true, upstreamStream, mode, continuation, clientTools, tools: prepared.payload.tools, outputLimit };
 }
 
 const finishReasons = { stop: "STOP", length: "MAX_TOKENS", content_filter: "SAFETY", tool_calls: "STOP" };

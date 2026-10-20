@@ -13,7 +13,8 @@ import { translateNativeCompletion, wrapNativeStream } from "./vertex-protocol.m
 import { geminiModelKey, modelProfiles } from "./model-profiles.mjs";
 import { completionStream, aliasStream } from "./completion-stream.mjs";
 import { convertGeminiPrefill, fetchWithGeminiRecovery, compatibilityLogFields } from "./gemini-compat.mjs";
-import { prepareGemini4Request, validateGemini4Connection, validateGemini4Output } from "./gemini4.mjs";
+import { capGemini4Output, outputLimitHeaders, prepareGemini4Request, validateGemini4Connection } from "./gemini4.mjs";
+import { fetchLongDecode, longDecodeUrl } from "./vertex-long-decode.mjs";
 import { documentedUnsupported, dropParams } from "./unsupported-params.mjs";
 import { googleErrorDetail, trafficType, upstreamErrorLogFields } from "./wire.mjs";
 import { waitWithSignal } from "./abort.mjs";
@@ -170,7 +171,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
     const onClose = () => { if (!response.writableEnded) client.abort(); };
     response.once("close", onClose);
     request.once("aborted", onClose);
-    let unicode = null, image = null;
+    let unicode = null, image = null, outputLimit = null;
     let stream = false, audit = null, integrity = null, status = 500, code = null, route, droppedParams = [], upstreamError = null, credential = null;
     const compatibility = { prefillConverted: false, promptRetried: false };
     try {
@@ -222,16 +223,27 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       const transport = prepareAntiTruncation(payload, route.mode !== "normal" && config.antiTruncation !== false, route.mode === "streaming", { native: !custom });
       const buffered = route.mode === "buffered" && Boolean(transport.toolName);
       const upstreamStream = stream && !buffered;
-      validateGemini4Output(payload, modelKey, upstreamStream);
       if (buffered) transport.reason = "tool-transport-buffered";
-      const native = transport.nativeStreaming || config.nativeOnly;
+      // Gemini 4 Argon: a ceiling over one request's limit is capped at it, or kept for long
+      // decode on the native API. A custom upstream calls Google in ways the gateway cannot
+      // see, so it gets the lowest limit, or its ceiling unchanged when long decode is on.
+      if (!(custom && config.geminiLongDecode)) {
+        const capped = capGemini4Output(transport.payload, modelKey, custom ? { limit: 32768 } : { stream: upstreamStream,
+          longDecode: config.geminiLongDecode && (transport.nativeStreaming || config.nativeOnly || supportsNativeRequest(payload)) });
+        transport.payload = capped.payload;
+        outputLimit = capped.outputLimit;
+      }
+      const longDecode = outputLimit?.longDecode === true;
+      for (const [name, value] of Object.entries(outputLimitHeaders(outputLimit))) response.setHeader(name, value);
+      const native = transport.nativeStreaming || config.nativeOnly || longDecode;
       if (config.nativeOnly && !supportsNativeRequest(payload)) throw new Problem(400, "unsupported_native_fields");
       audit = { transport: transport.reason, restored: transport.toolName ? null : false,
         finishReason: null, streamDone: stream ? false : null };
       response.setHeader("x-anti-truncation-transport", transport.reason);
-      const url = native
+      let url = native
         ? buildNativeUrl(config.baseUrl, route.upstreamModel, upstreamStream)
         : config.baseUrl + "/chat/completions";
+      if (longDecode) url = longDecodeUrl(url);
       const expectation = native ? structuredOutputExpectation(payload) : null;
       const requestBody = value => {
         const body = transport.nativeStreaming ? buildNativeTextBody(value)
@@ -255,11 +267,18 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       // with a cause. A TypeError without one comes from building the request, where the only
       // variable header is the credential (for example a key with non-Latin-1 characters).
       // Errors while reading a body that has started keep their protocol handling.
-      let upstream = await fetchWithGeminiRecovery(value => fetchImpl(url, { method: "POST", redirect: "error", signal, dispatcher,
-        headers: { ...authentication, ...config.tierHeaders, "content-type": "application/json", accept: upstreamStream ? "text/event-stream" : "application/json" },
-        body: JSON.stringify(value === upstreamPayload ? firstBody : requestBody(value)) }).catch(error => {
-        throw error instanceof TypeError ? new Problem(502, error.cause ? "upstream_unreachable" : "credential_error") : error;
-      }), upstreamPayload, modelKey, {
+      const post = body => {
+        if (longDecode) outputLimit.requests = (outputLimit.requests ?? 0) + 1;
+        return fetchImpl(url, { method: "POST", redirect: "error", signal, dispatcher,
+          headers: { ...authentication, ...config.tierHeaders, "content-type": "application/json", accept: upstreamStream ? "text/event-stream" : "application/json" },
+          body: JSON.stringify(body) }).catch(error => {
+          throw error instanceof TypeError ? new Problem(502, error.cause ? "upstream_unreachable" : "credential_error") : error;
+        });
+      };
+      let upstream = await fetchWithGeminiRecovery(value => {
+        const body = value === upstreamPayload ? firstBody : requestBody(value);
+        return longDecode ? fetchLongDecode(post, body, upstreamStream) : post(body);
+      }, upstreamPayload, modelKey, {
         settings: config.geminiPromptRetry, signal, bodyLimit: config.bodyLimitBytes,
         onRetry: () => { compatibility.promptRetried = true; },
       });
@@ -354,7 +373,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
         serviceTier: config.serviceTier || "standard",
         trafficType: ["ON_DEMAND", "ON_DEMAND_FLEX", "ON_DEMAND_PRIORITY", "PROVISIONED_THROUGHPUT"].includes(audit?.trafficType) ? audit.trafficType : null,
         ...imageInputLogFields(image), ...unicodeInputLogFields(unicode), ...antiTruncationLogFields(audit), ...integrityLogFields(integrity), ...compatibilityLogFields(compatibility),
-        ...upstreamErrorLogFields(upstreamError), ...(droppedParams.length ? { droppedParams } : {}), ...(code ? { code } : {}),
+        ...upstreamErrorLogFields(upstreamError), ...(droppedParams.length ? { droppedParams } : {}), ...(outputLimit ? { outputLimit } : {}), ...(code ? { code } : {}),
         ...(tokens ? { usage: tokens, estimatedCostUsd: cost } : {}) };
       events.push(event);
       if (events.length > 200) events.shift();

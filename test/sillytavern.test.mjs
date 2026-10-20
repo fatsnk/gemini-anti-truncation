@@ -45,7 +45,25 @@ test("SillyTavern Gemini 4 uses thinking levels without relying on older Tavern 
     assert.equal(prepared.body.generationConfig.maxOutputTokens, 128);
     for (const key of ["temperature", "topP", "topK", "presencePenalty"]) assert.equal(prepared.body.generationConfig[key], undefined);
   }
-  assert.throws(() => prepareSillyTavernRequest(request({ model: "gemini-4-argon", max_tokens: 65537 }), adapters), { code: "gemini4_long_decode_required" });
+});
+
+test("SillyTavern caps Gemini 4 output by the actual upstream request, or keeps it for long decode", () => {
+  for (const mode of ["buffered", "streaming"]) for (const stream of [false, true]) for (const image of ["off", "current-turn"]) {
+    // A quiet request, such as the connection test, is never streamed.
+    const input = request({ model: "gemini-4-argon", max_tokens: 100000, vertex_anti_truncation: mode,
+      type: stream ? "normal" : "quiet", messages: [{ role: "user", content: "Hi" }], stream, vertex_image_input: image });
+    const original = structuredClone(input);
+    const upstreamStream = mode === "streaming" && stream && image === "off";
+    const applied = upstreamStream ? 65536 : 32768;
+    const prepared = prepareSillyTavernRequest(input, adapters);
+    assert.equal(prepared.body.generationConfig.maxOutputTokens, applied);
+    assert.deepEqual(prepared.outputLimit, { requested: 100000, applied, longDecode: false });
+    assert.deepEqual(input, original);
+    const long = prepareSillyTavernRequest(request({ ...input.body, vertex_long_decode: true }), adapters);
+    assert.equal(long.body.generationConfig.maxOutputTokens, 100000);
+    assert.deepEqual(long.outputLimit, { requested: 100000, applied: 100000, longDecode: true });
+  }
+  assert.equal(prepareSillyTavernRequest(request({ model: "gemini-4-argon" }), adapters).outputLimit, null);
 });
 
 test("SillyTavern intercept is scoped, preserves CSRF/cancellation, and never retries failures", async () => {
@@ -463,6 +481,64 @@ test("server handler routes Express Argon through global once and rejects missin
     assert.equal(stream ? contents(text) : JSON.parse(text).choices[0].message.content, "正文😀");
   }
   assert.equal(calls, 5, "one upstream call per successful request, with no duplicate project path");
+});
+
+test("server plugin continues an Argon reply on v1beta1 only when the panel enables long decode", async t => {
+  const calls = [];
+  const usageMetadata = { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 };
+  const piece = (stringValue, willContinue) => nativeCall({ partialArgs: [{ jsonPath: "$.content", stringValue, willContinue }], willContinue: true });
+  const handler = createGenerateHandler(adapters, { fetchImpl: async (url, init) => {
+    const sent = JSON.parse(init.body);
+    calls.push({ url, sent });
+    const name = sent.tools[0].functionDeclarations[0].name;
+    if (!url.includes("/v1beta1/")) return new Response(completeWire(name));
+    // Assumes the continued request resumes the same argument stream.
+    return new Response(sent.continuationToken ? piece("后半", false) + nativeCall({}) + sseData({ candidates: [{ finishReason: "STOP" }], usageMetadata })
+      : nativeCall({ name, willContinue: true }) + piece("前半", true) + sseData({ candidates: [{ finishReason: "CONTINUATION", continuationToken: "token-1" }], usageMetadata }));
+  } });
+  const server = http.createServer(async (req, res) => {
+    const chunks = []; for await (const chunk of req) chunks.push(chunk);
+    req.body = JSON.parse(Buffer.concat(chunks).toString()); req.user = { directories: {} };
+    res.status = value => { res.statusCode = value; return res; };
+    res.json = value => res.end(JSON.stringify(value));
+    await handler(req, res);
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const post = extra => fetch(`http://127.0.0.1:${server.address().port}`, { method: "POST", body: JSON.stringify({ ...body, ...extra }) });
+  const argon = { model: "gemini-4-argon", vertexai_express_project_id: "example-project", max_tokens: 100000 };
+  const capped = await post(argon);
+  assert.equal(capped.headers.get("x-gemini-output-tokens-applied"), "65536");
+  assert.equal(capped.headers.get("x-gemini-long-decode"), "false");
+  assert.equal(contents(await capped.text()), "正文😀");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].sent.generationConfig.maxOutputTokens, 65536);
+  const long = await post({ ...argon, vertex_long_decode: true });
+  assert.equal(long.headers.get("x-gemini-output-tokens-applied"), "100000");
+  assert.equal(long.headers.get("x-gemini-long-decode"), "true");
+  assert.equal(contents(await long.text()), "前半后半");
+  assert.equal(calls.length, 3);
+  for (const { url, sent } of calls.slice(1)) {
+    assert.equal(url, "https://aiplatform.googleapis.com/v1beta1/projects/example-project/locations/global/publishers/google/models/gemini-4-argon:streamGenerateContent?alt=sse");
+    assert.equal(sent.generationConfig.maxOutputTokens, 100000);
+  }
+  assert.deepEqual(calls[2].sent, { ...calls[1].sent, continuationToken: "token-1" });
+});
+
+test("the long-decode setting rides only on plugin requests, and the reported limit reaches the panel", async () => {
+  const calls = [], statuses = [];
+  const headers = { "x-gemini-output-tokens-requested": "100000", "x-gemini-output-tokens-applied": "100000", "x-gemini-long-decode": "true" };
+  const intercept = createFetchInterceptor(async (...args) => { calls.push(args); return new Response("OK", { headers }); },
+    { origin: "http://localhost", getMode: () => "streaming", getLongDecode: () => true, onStatus: s => statuses.push(s) });
+  await intercept(GENERATE_PATH, { method: "POST", body: JSON.stringify(body) });
+  assert.equal(calls.at(-1)[0], PLUGIN_PATH + "/generate");
+  assert.equal(JSON.parse(calls.at(-1)[1].body).vertex_long_decode, true);
+  assert.deepEqual(statuses.at(-1), { mode: "streaming", outputLimit: { requested: 100000, applied: 100000, longDecode: true } });
+  // A request the plugin does not take keeps ST's route and body unchanged.
+  const schema = { method: "POST", body: JSON.stringify({ ...body, json_schema: { type: "object" } }) };
+  await intercept(GENERATE_PATH, schema);
+  assert.deepEqual(calls.at(-1), [GENERATE_PATH, schema]);
+  assert.deepEqual(statuses.at(-1), { bypass: "structured-output" });
 });
 
 test("Unicode transforms before off/tools/schema bypass and retains Request metadata", async () => {

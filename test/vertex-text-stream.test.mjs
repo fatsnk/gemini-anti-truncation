@@ -87,6 +87,31 @@ test("native partialArgs preserve quotes, control characters, split surrogates, 
   assert.ok(text.endsWith("data: [DONE]\n\n"));
 });
 
+test("native partialArgs accept Google's valueless string terminator", async () => {
+  for (const marker of [{ jsonPath: "$.content" }, { jsonPath: "$.content", willContinue: false }]) {
+    const records = parse(await restore(start() + part('text "quoted"\n') +
+      call({ partialArgs: [marker], willContinue: true }) + call({}) + finish()));
+    assert.equal(content(records), 'text "quoted"\n');
+    assert.equal(records.find(r => r.choices?.[0]?.finish_reason)?.choices[0].finish_reason, "stop");
+    assert.equal(records.findLast(r => r.router_anti_truncation).router_anti_truncation.restored, true);
+  }
+});
+
+test("native partialArgs reject missing values, wrong value types and misplaced terminators", async () => {
+  for (const marker of [null, {}, { jsonPath: "$.content", willContinue: true },
+    { jsonPath: "$.content", stringValue: null }, { jsonPath: "$.content", stringValue: 1 },
+    { jsonPath: "$.content", numberValue: 0 }, { jsonPath: "$.content", boolValue: false },
+    { jsonPath: "$.content", nullValue: "NULL_VALUE" },
+    { jsonPath: "$.content", stringValue: "text", numberValue: 1 }]) {
+    await assert.rejects(restore(start() + part("first") +
+      call({ partialArgs: [marker] }) + finish()), /anti_truncation_native_invalid_partial_args/);
+  }
+  for (const prefix of [start(), start() + part("closed", false)]) {
+    await assert.rejects(restore(prefix + call({ partialArgs: [{ jsonPath: "$.content" }] }) + finish()),
+      /anti_truncation_native_invalid_partial_args/);
+  }
+});
+
 test("native transport handles full arguments, plain fallback and thought metadata without combining answers", async () => {
   const wire = event({ candidates: [{ content: { parts: [{ text: "meta", thought: true }, { text: "plain" }] } }] }) +
     call({ name, args: { content: "synthetic" } }) + finish();

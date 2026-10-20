@@ -112,7 +112,7 @@ function errorMessage(message) {
   };
   const envPrefix = "Environment settings were ignored: ";
   if (message?.startsWith(envPrefix)) return "已忽略环境变量中的设置：" + errorMessage(message.slice(envPrefix.length)) + "请在连接配置中填写并保存；保存后控制台改用保存的配置。";
-  const toggle = /^Invalid (UNICODE_INPUT|HIDE_UNAVAILABLE_MODELS|GEMINI_PREFILL_TO_USER|GEMINI_PROMPT_RETRY_ENABLED)$/.exec(message || "");
+  const toggle = /^Invalid (UNICODE_INPUT|HIDE_UNAVAILABLE_MODELS|GEMINI_PREFILL_TO_USER|GEMINI_LONG_DECODE|GEMINI_PROMPT_RETRY_ENABLED)$/.exec(message || "");
   if (toggle) return `环境变量 ${toggle[1]} 只能是 true 或 false。`;
   if (message?.startsWith("anti_truncation_")) return `抗截断正文还原失败（${message}），可以重试，或用正常版本对比。`;
   if (message?.startsWith("Express model listing is unavailable")) return `当前 Express API Key 无法读取模型目录（${message.match(/HTTP \d+/)?.[0] || "访问受限"}）。可以手动添加模型 ID，或改用服务账号拉取；已保存的模型不受影响。`;
@@ -208,7 +208,7 @@ function draft() {
     customBaseUrl: $("custom-base-url").value.trim(), customApiKey: credential("custom-api-key", "custom"),
     port: Number($("port").value), timeoutMs: Number($("timeout").value) * 1000, antiTruncation: true, models: state.models.map(m => ({ ...m })),
     unicodeInput: $("unicode-input").checked, imageInput: $("image-input").value, hideUnavailableModels: $("hide-unavailable").checked, geminiPrefillToUser: $("prefill-to-user").checked,
-    geminiPromptRetryEnabled: $("prompt-retry-enabled").checked, geminiPromptRetryText: $("prompt-retry-text").value,
+    geminiLongDecode: $("long-decode").checked, geminiPromptRetryEnabled: $("prompt-retry-enabled").checked, geminiPromptRetryText: $("prompt-retry-text").value,
     geminiPromptRetryMatches: retryMatches() };
 }
 function retryMatches() {
@@ -285,6 +285,7 @@ function fillConfig(c = state.config.settings) {
   $("image-input").value = c.imageInput || "off";
   $("hide-unavailable").checked = c.hideUnavailableModels !== false;
   $("prefill-to-user").checked = c.geminiPrefillToUser !== false;
+  $("long-decode").checked = c.geminiLongDecode === true;
   $("prompt-retry-enabled").checked = c.geminiPromptRetryEnabled === true;
   $("prompt-retry-text").value = c.geminiPromptRetryText || "";
   $("prompt-retry-matches").value = (c.geminiPromptRetryMatches || []).join("\n");

@@ -35,6 +35,109 @@ async function fixture(t, authMode, serviceTier, stream = false, options = {}) {
   return { post, requests, events };
 }
 
+async function gateway(t, settings, respond) {
+  const events = [], requests = [];
+  const config = buildConfig({ ...DEFAULT_SETTINGS, projectId: "example-project", gatewayKey: "synthetic-gateway-fixture-key", accessToken: "synthetic-token", apiKey: "synthetic-express-key", ...settings });
+  const server = createGatewayServer(config, { logger: e => events.push(e), fetchImpl: async (url, request) => {
+    const call = { url, body: JSON.parse(request.body) }; requests.push(call); return respond(call, requests.length);
+  } });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const post = body => fetch(`http://127.0.0.1:${server.address().port}/v1/chat/completions`, {
+    method: "POST", headers: { authorization: "Bearer " + config.gatewayKey, "content-type": "application/json" }, body: JSON.stringify({ ...payload, ...body }),
+  });
+  return { post, requests, events };
+}
+const records = text => text.split("\n\n").filter(line => line.startsWith("data: {")).map(line => JSON.parse(line.slice(6)));
+const reply = async (response, stream) => {
+  if (!stream) { const { choices: [choice] } = await response.json(); return { text: choice.message.content, finish: [choice.finish_reason] }; }
+  const choices = records(await response.text()).flatMap(record => record.choices);
+  return { text: choices.map(choice => choice.delta.content ?? "").join(""), finish: choices.map(choice => choice.finish_reason).filter(Boolean) };
+};
+
+test("Argon output ceilings are capped at the actual upstream request's limit, with one request", async t => {
+  for (const authMode of ["express", "access-token"]) for (const mode of ["normal", "buffered", "streaming"]) {
+    for (const stream of [false, true]) for (const field of ["max_tokens", "max_completion_tokens"]) {
+      // Buffered anti-truncation sends a unary request even when the client streams.
+      const upstreamStream = stream && mode !== "buffered";
+      const applied = upstreamStream ? 65536 : 32768;
+      const f = await fixture(t, authMode, "standard", upstreamStream, { models: [{ id: "argon", upstreamModel: "gemini-4-argon", mode }] });
+      const response = await f.post({ model: "argon", stream, max_tokens: undefined, [field]: 100000 });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("x-gemini-output-tokens-requested"), "100000");
+      assert.equal(response.headers.get("x-gemini-output-tokens-applied"), String(applied));
+      assert.equal(response.headers.get("x-gemini-long-decode"), "false");
+      await response.text();
+      assert.equal(f.requests.length, 1);
+      const sent = f.requests[0];
+      assert.match(sent.url, /\/v1\/projects\//);
+      assert.equal(sent.url.endsWith("/chat/completions") ? sent.body[field] : sent.body.generationConfig.maxOutputTokens, applied);
+      assert.deepEqual(f.events[0].outputLimit, { requested: 100000, applied, longDecode: false });
+    }
+  }
+});
+
+test("with long decode on, Argon replies over the limit continue on v1beta1 until Google stops", async t => {
+  const usageMetadata = { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15, trafficType: "ON_DEMAND" };
+  const textHops = [{ parts: [{ text: "前半" }], finishReason: "CONTINUATION", continuationToken: "token-1" }, { parts: [{ text: "后半" }], finishReason: "STOP" }];
+  const text = ({ url }, count) => {
+    const { parts, ...end } = textHops[count - 1];
+    const result = { candidates: [{ content: { role: "model", parts }, ...end }], usageMetadata };
+    return url.includes(":streamGenerateContent") ? new Response(sse(result)) : Response.json(result);
+  };
+  // Streaming anti-truncation, assuming the continued request resumes the same argument stream.
+  const call = functionCall => sse({ candidates: [{ content: { role: "model", parts: [{ functionCall }] } }] });
+  const piece = (stringValue, willContinue) => call({ partialArgs: [{ jsonPath: "$.content", stringValue, willContinue }], willContinue: true });
+  const argumentStream = ({ body }, count) => new Response(count === 1
+    ? call({ name: body.tools[0].functionDeclarations[0].name, willContinue: true }) + piece("前半", true)
+      + sse({ candidates: [{ finishReason: "CONTINUATION", continuationToken: "token-1" }], usageMetadata })
+    : piece("后半", false) + call({}) + sse({ candidates: [{ finishReason: "STOP" }], usageMetadata }));
+  for (const [authMode, mode, stream, respond] of [["express", "normal", false, text], ["express", "normal", true, text],
+    // Full mode would use the compatible endpoint; long decode needs the native one.
+    ["access-token", "normal", false, text], ["access-token", "normal", true, text], ["access-token", "streaming", true, argumentStream]]) {
+    const f = await gateway(t, { authMode, geminiLongDecode: true, models: [{ id: "argon", upstreamModel: "gemini-4-argon", mode }] }, respond);
+    const response = await f.post({ model: "argon", stream, max_tokens: 100000 });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-gemini-long-decode"), "true");
+    assert.deepEqual(await reply(response, stream), { text: "前半后半", finish: ["stop"] });
+    assert.equal(f.requests.length, 2);
+    for (const sent of f.requests) {
+      assert.match(sent.url, /^https:\/\/aiplatform\.googleapis\.com\/v1beta1\/projects\/example-project\/locations\/global\/publishers\/google\/models\/gemini-4-argon:/);
+      assert.equal(sent.body.generationConfig.maxOutputTokens, 100000);
+    }
+    assert.equal(f.requests[0].body.continuationToken, undefined);
+    assert.deepEqual(f.requests[1].body, { ...f.requests[0].body, continuationToken: "token-1" });
+    assert.deepEqual(f.events[0].outputLimit, { requested: 100000, applied: 100000, longDecode: true, requests: 2 });
+    // Each request is billed for its input again.
+    assert.equal(f.events[0].usage.promptTokens, 20);
+  }
+  // Ceilings within one request, and requests only the compatible endpoint can carry, keep a single request.
+  for (const [patch, url, sent] of [[{ max_tokens: 1000 }, /\/v1\/projects\//, 1000], [{ max_tokens: 100000, logprobs: true }, /\/v1\/projects\/.*\/chat\/completions$/, 32768]]) {
+    const f = await gateway(t, { authMode: "access-token", geminiLongDecode: true, models: [{ id: "argon", upstreamModel: "gemini-4-argon", mode: "normal" }] },
+      ({ body }) => compatResponse(body, "ON_DEMAND", false));
+    const response = await f.post({ model: "argon", ...patch });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(f.requests.length, 1);
+    assert.match(f.requests[0].url, url);
+    assert.equal(f.requests[0].body.max_tokens, sent);
+  }
+});
+
+test("a custom upstream gets the lowest single-request limit, or its ceiling unchanged with long decode on", async t => {
+  for (const geminiLongDecode of [false, true]) for (const stream of [false, true]) {
+    const f = await gateway(t, { authMode: "custom", customBaseUrl: "https://relay.example.invalid/v1", customApiKey: "synthetic-relay-key", geminiLongDecode,
+      models: [{ id: "relay", upstreamModel: "[满血]Gemini-4-Argon", mode: "normal" }] }, ({ body }) => compatResponse(body, "ON_DEMAND", body.stream));
+    const response = await f.post({ model: "relay", stream, max_tokens: 100000 });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.requests[0].url, "https://relay.example.invalid/v1/chat/completions");
+    assert.equal(f.requests[0].body.max_tokens, geminiLongDecode ? 100000 : 32768);
+    assert.equal(response.headers.get("x-gemini-long-decode"), geminiLongDecode ? null : "false");
+  }
+});
+
 test("Express tiers and full-mode Flex reach the correct native URLs with correct auth, preserving restoration and actual tier", async t => {
   for (const [authMode, tier] of [["express", "flex"], ["express", "priority"], ["access-token", "flex"]]) for (const stream of [false, true]) {
     const f = await fixture(t, authMode, tier, stream);

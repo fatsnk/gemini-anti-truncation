@@ -20,7 +20,8 @@ const errors = { unicode_floor_required: "找不到真实用户楼层，已停�
   image_input_too_large: "转成图片后超过大小或页数限制，已停止发送。请缩短对话，或改用“图片·当前轮”。",
   image_renderer_unavailable: "服务端图片渲染组件不可用。请在服务端插件目录运行 npm ci --ignore-scripts 后重启酒馆。",
   image_render_failed: "服务端图片渲染失败，已停止发送，未改用明文。",
-  request_too_large: "请求超过 8 MiB，插件已拒绝发送。请减少附件或聊天历史。" };
+  request_too_large: "请求超过 8 MiB，插件已拒绝发送。请减少附件或聊天历史。",
+  gemini4_long_decode_required: "服务端插件较旧，输出上限超过 Gemini 4 Argon 单次上限时会拒绝发送。请更新服务端插件后重启酒馆；或在预设里把最大回复长度降到 32,768（非流式）／65,536（流式）以内。" };
 const updateServer = "用安装包装的，下载新版安装包再运行一次；用 Git 装的，在服务端插件目录运行 git pull --ff-only 和 npm ci --ignore-scripts。之后重启酒馆并重新检查。";
 let status, select, backendReady, backendFeatures = [], backendWarning;
 function settings() {
@@ -50,7 +51,11 @@ function updateStatus(result) {
     "no-text": noText + (result.image.stream && result.mode !== "buffered" ? "图片输入请求仍按非流式交付。" : "") }[result.image.reason] || "" : "";
   const bypass = result.bypass && result.bypass !== "disabled" ? `本次使用普通 Vertex：${reasons[result.bypass] ?? result.bypass}。` : "";
   const continuation = result.continuation ? "本次“继续”已请求仅生成新增续文，由酒馆追加到原消息。" : "";
-  showStatus([unicode, image, bypass, continuation].filter(Boolean).join(" "));
+  const limit = result.outputLimit, tokens = value => value.toLocaleString("en-US");
+  const output = !limit ? "" : limit.longDecode
+    ? `本次输出上限 ${tokens(limit.applied)} token（含思考）超过单次上限，写满后自动续写。`
+    : `本次输出上限按单次上限 ${tokens(limit.applied)} token（含思考）发送，预设未改动；写满会停止并标记为长度截断。`;
+  showStatus([unicode, image, bypass, continuation, output].filter(Boolean).join(" "));
 }
 
 async function checkBackend(silent = false) {
@@ -125,8 +130,26 @@ function mount() {
     context.saveSettingsDebounced();
     showStatus();
   });
-  panel.append(label, select, inputLabel, input, status, direct ? Object.assign(document.createElement("small"),
-    { textContent: "TauriTavern：抗截断由本扩展直接完成，无需服务端插件；不支持图片输入。" }) : check);
+  panel.append(label, select, inputLabel, input);
+  // TauriTavern's own backend sends the request, so it cannot follow long-decode continuation tokens.
+  if (!direct) {
+    const longDecode = document.createElement("label");
+    longDecode.className = "checkbox_label";
+    longDecode.htmlFor = "vertex_long_decode";
+    const box = Object.assign(document.createElement("input"), { type: "checkbox", id: longDecode.htmlFor, checked: saved.longDecode === true });
+    box.addEventListener("change", () => {
+      settings().longDecode = box.checked;
+      context.saveSettingsDebounced();
+      showStatus();
+    });
+    longDecode.append(box, Object.assign(document.createElement("span"), { textContent: "Gemini 4 Argon 超长回复自动续写（long decode，实验）" }));
+    panel.append(longDecode, Object.assign(document.createElement("small"), { textContent:
+      "关闭时，最大回复长度超过单次上限（流式 65,536、非流式 32,768 token，含思考）会按单次上限发送，不再报错；回复写满就停止并标记为长度截断，非流式抗截断写满时可能拿不到正文，可点“继续”接着写。"
+      + "开启后改用 Google 的 v1beta1 接口，写满后自动续写并拼成一条回复，最多写到预设的长度。只有真写超单次上限才会追加请求；每续写一段都重发完整上下文，费用和等待时间随之增加，整次请求最长 10 分钟。"
+      + "与抗截断传输及 Express、Flex、Priority 的配合尚未用真实超长输出验证，可能中途失败。" }));
+  }
+  panel.append(status, direct ? Object.assign(document.createElement("small"),
+    { textContent: "TauriTavern：抗截断由本扩展直接完成，无需服务端插件；不支持图片输入和超长回复自动续写。" }) : check);
   parent.append(panel);
   // Install once and chain any previously installed fetch wrapper.
   const key = Symbol.for("vertex-anti-truncation.fetch");
@@ -135,6 +158,7 @@ function mount() {
     window.fetch = createFetchInterceptor(window.fetch.bind(window), { origin: location.origin, getMode: mode,
       getImageInput: () => direct ? "off" : settings().imageInput || "off",
       getUnicodeInput: () => settings().unicodeInput === true,
+      getLongDecode: () => !direct && settings().longDecode === true,
       getUserFloor: () => latestUserFloor(SillyTavern.getContext().chat),
       // Image input, Continue and client tools require a matching server plugin.
       ensureBackend: async feature => Boolean(direct) ||

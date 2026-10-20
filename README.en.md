@@ -29,7 +29,7 @@ When you finish, tell me which files you changed, where the backups are, how to 
 
 Experimental release with configurable Gemini models. The existing Gemini 3.7 Flash alias remains the default. Model and function-argument streaming availability depend on Google. The gateway and the SillyTavern server plugin require Node.js 22.9+ (the TauriTavern adaptation needs no Node.js); optional text-to-image input uses @napi-rs/canvas plus the bundled OFL-licensed Noto CJK font.
 
-Gemini 4 Argon (`gemini-4-argon`) supports normal, buffered and native-streaming transport profiles. See [setup, Express keys, custom upstream boundaries and long-decode limits](docs/GEMINI4.en.md). The Tavern plugin part ships in SillyTavern integration 0.4.0 (`sillytavern-v0.4.0`); the gateway part ships in gateway 0.8.0, available as source and Docker images.
+Gemini 4 Argon (`gemini-4-argon`) supports normal, buffered and native-streaming transport profiles. See [setup, Express keys, custom upstream boundaries, and output limits with optional long decode](docs/GEMINI4.en.md). The Tavern plugin part ships in SillyTavern integration 0.4.0 (`sillytavern-v0.4.0`); the gateway part ships in gateway 0.8.0, available as source and Docker images.
 
 A paired SillyTavern UI extension and server plugin can also add the transport selector directly to the existing Google Vertex AI connection panel. It reuses Tavern credentials and runs inside the Tavern process. Disabled by default; see the [installation and validation guide (Chinese)](docs/SILLYTAVERN.md).
 
@@ -224,6 +224,7 @@ Use **Connection → SillyTavern compatibility and retry** to control each featu
 | Hide models without an available route | On | Filter disabled profiles and known authentication failures from `/v1/models`; temporary errors remain visible |
 | Gemini 3.7 / 3.8 Flash prefill to USER | On | Change the last plain-text `assistant` message to `user` before wrapping, preserving its text |
 | Prompt submission retry | Off | Enter your own text first; errors matching a rule (one by default) can add one submission |
+| Gemini 4 Argon long decode | Off | Off: an output limit above one request's maximum (65,536 streamed, 32,768 unary) is sent as that maximum instead of failing. On: a reply that reaches it continues with Google's long decode. See [Gemini 4 output limits and long decode](docs/GEMINI4.en.md#output-limits-and-long-decode) for behavior and compatibility risks |
 
 The standalone gateway shares one upstream connection. Disable a saved profile with its Enable checkbox without deleting it. Disabled profiles cannot be called, even when the visibility filter is off. An upstream HTTP 401 hides profiles on the rejected connection until settings are reapplied, the gateway restarts, or a direct request succeeds. HTTP 403/404/429, timeouts and 5xx do not hide profiles. Listing models never probes inference and does not establish Google project access.
 
@@ -233,7 +234,7 @@ Retry rules are editable in the console under "upstream errors that trigger the 
 
 Supply around 7000 tokens of your own text. The GUI estimate is approximate, not Google's token count. Text is limited to 192000 UTF-8 bytes and inserted unchanged after leading `system` / `developer` messages, before the remaining conversation. It is not padded, repeated or truncated. Each client request can add at most one submission using the same model, credentials and tier. Cancellation, oversized requests and output already in progress prevent replay. A second failure ends the request. Added input can increase cost, context use and latency; successful submission is not guaranteed.
 
-Logs add only `geminiCompatibility.prefillConverted` / `promptRetried` booleans and the console displays these outcomes; custom text is never logged. Response headers are `x-gemini-prefill-converted` / `x-gemini-prompt-retried`. CLI settings use `HIDE_UNAVAILABLE_MODELS`, `GEMINI_PREFILL_TO_USER`, `GEMINI_PROMPT_RETRY_ENABLED`, `GEMINI_PROMPT_RETRY_TEXT_FILE` pointing to an external UTF-8 file, and `GEMINI_PROMPT_RETRY_MATCHES` with rules separated by `|`.
+Logs add only `geminiCompatibility.prefillConverted` / `promptRetried` booleans and the console displays these outcomes; custom text is never logged. Response headers are `x-gemini-prefill-converted` / `x-gemini-prompt-retried`. CLI settings use `HIDE_UNAVAILABLE_MODELS`, `GEMINI_PREFILL_TO_USER`, `GEMINI_LONG_DECODE`, `GEMINI_PROMPT_RETRY_ENABLED`, `GEMINI_PROMPT_RETRY_TEXT_FILE` pointing to an external UTF-8 file, and `GEMINI_PROMPT_RETRY_MATCHES` with rules separated by `|`.
 
 ### Unsupported parameters and upstream timeout
 

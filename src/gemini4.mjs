@@ -45,12 +45,28 @@ export function prepareGemini4Request(payload, model) {
   return result;
 }
 
-export function validateGemini4Output(payload, model, stream) {
-  if (!isGemini4Argon(model)) return;
-  const limit = stream ? 65536 : 32768;
-  const requested = payload.max_tokens ?? payload.max_completion_tokens;
-  if (requested > limit) throw invalid("gemini4_long_decode_required", `Gemini 4 Argon supports at most ${limit} output tokens per ${stream ? "streaming" : "non-streaming"} upstream request here; continuation-token long decode is not implemented. Lower the limit or use Google's long-decode API.`);
+// One Argon request returns at most 65,536 output tokens when streamed and 32,768 when
+// not, thinking included; long decode continues a reply in further requests up to
+// 1,048,576 minus the input. A larger ceiling is sent as the request's limit, or with
+// long decode as the requested total, instead of failing: a high ceiling alone does not
+// mean the reply needs it, and even SillyTavern's "Hi" connection test carries the preset's.
+export function gemini4OutputLimit(requested, model, { stream = false, limit = stream ? 65536 : 32768, longDecode = false } = {}) {
+  if (!isGemini4Argon(model) || !Number.isFinite(requested) || requested <= limit) return null;
+  return { requested, applied: longDecode ? Math.min(requested, 1048576) : limit, longDecode };
 }
+
+// The same for an OpenAI-format request, which may carry either ceiling field.
+export function capGemini4Output(payload, model, options) {
+  const outputLimit = gemini4OutputLimit(payload.max_tokens ?? payload.max_completion_tokens, model, options);
+  if (!outputLimit) return { payload, outputLimit };
+  const capped = { ...payload };
+  for (const key of ["max_tokens", "max_completion_tokens"]) if (Number.isFinite(capped[key])) capped[key] = Math.min(capped[key], outputLimit.applied);
+  return { payload: capped, outputLimit };
+}
+
+// Tells the client the ceiling it asked for, the one sent, and whether long decode may continue past one request.
+export const outputLimitHeaders = limit => limit ? { "x-gemini-output-tokens-requested": String(limit.requested),
+  "x-gemini-output-tokens-applied": String(limit.applied), "x-gemini-long-decode": String(limit.longDecode) } : {};
 
 // Preserve both the native function-call ID and thought signature inside the
 // opaque OpenAI tool-call ID; tool results must echo the native ID on Gemini 4.

@@ -2,7 +2,7 @@ import { prepareAntiTruncation, wrapAntiTruncationStream } from "./anti-truncati
 import { nativeRequestBody } from "./vertex-native.mjs";
 import { wrapNativeTextStream } from "./vertex-text-stream.mjs";
 import { guardCompletionStream } from "./completion-integrity.mjs";
-import { validateGemini4Output } from "./gemini4.mjs";
+import { capGemini4Output, outputLimitHeaders } from "./gemini4.mjs";
 import { completedSillyTavernResponse, toSillyTavernStream } from "./sillytavern.mjs";
 import { createSseParser, isObject, sseData, transformSse } from "./wire.mjs";
 import { BODY_LIMIT, usesTools } from "../integrations/sillytavern/shared.js";
@@ -31,8 +31,10 @@ export function prepareTauriTavernRequest(body, mode) {
   if (usesTools(body)) return { bypass: "tauri-tools" };
   const included = includedBody(body.custom_include_body);
   if (!included) return { bypass: "additional-parameters" };
-  // The upstream request is always streamGenerateContent here.
-  validateGemini4Output(body, body.model, true);
+  // The upstream request is always streamGenerateContent here, and TauriTavern's backend
+  // cannot follow long-decode continuation tokens.
+  const { payload, outputLimit } = capGemini4Output(body, body.model, { stream: true });
+  body = payload;
   const continuation = body.type === "continue";
   const upstreamStream = mode === "streaming" && body.stream === true;
   const prepared = prepareAntiTruncation({ messages: body.messages }, true, false, { continuation });
@@ -41,7 +43,7 @@ export function prepareTauriTavernRequest(body, mode) {
   return {
     body: { ...body, messages: prepared.payload.messages, stream: true,
       custom_include_body: JSON.stringify({ ...included, tools: native.tools, toolConfig: native.toolConfig }) },
-    toolName: prepared.toolName, model: body.model, stream: body.stream === true, upstreamStream, continuation,
+    toolName: prepared.toolName, model: body.model, stream: body.stream === true, upstreamStream, continuation, outputLimit,
   };
 }
 
@@ -115,7 +117,7 @@ export async function restoreTauriTavernResponse(response, prepared, signal) {
   let usageMetadata;
   const restored = guardCompletionStream(wrapAntiTruncationStream(wrapNativeTextStream(endHostError(response), prepared.toolName,
     prepared.model, usage => { usageMetadata = usage; }), prepared.toolName), () => {}, null, BODY_LIMIT);
-  const headers = prepared.continuation ? { "x-vertex-continuation": "suffix" } : {};
+  const headers = { ...(prepared.continuation ? { "x-vertex-continuation": "suffix" } : {}), ...outputLimitHeaders(prepared.outputLimit) };
   if (prepared.upstreamStream) {
     return new Response(reportStreamFailure(toSillyTavernStream(restored, () => usageMetadata).body, signal),
       { headers: { ...headers, "content-type": "text/event-stream; charset=utf-8" } });

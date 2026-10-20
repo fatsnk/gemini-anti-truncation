@@ -66,7 +66,7 @@ export function bypassReason(body, mode) {
 
 // ST 1.19 exposes a settings event, but not a generation-URL override. Intercept
 // only its same-origin Vertex POST; preserve the original fetch for everything else.
-export function createFetchInterceptor(originalFetch, { origin, getMode, getUnicodeInput = () => false, getImageInput = () => "off", getUserFloor = () => "", ensureBackend = async () => true, onStatus = () => {}, direct }) {
+export function createFetchInterceptor(originalFetch, { origin, getMode, getUnicodeInput = () => false, getImageInput = () => "off", getLongDecode = () => false, getUserFloor = () => "", ensureBackend = async () => true, onStatus = () => {}, direct }) {
   return async function vertexFetch(input, init) {
     let url;
     try { url = new URL(typeof input === "string" || input instanceof URL ? input : input.url, origin); }
@@ -107,7 +107,8 @@ export function createFetchInterceptor(originalFetch, { origin, getMode, getUnic
       catch (error) { onStatus({ error: error.code || "invalid_request" }); throw error; }
       reason = prepared.bypass ?? null;
     }
-    let payload = reason ? null : JSON.stringify(prepared?.body ?? { ...body, vertex_anti_truncation: mode });
+    let payload = reason ? null : JSON.stringify(prepared?.body ??
+      { ...body, vertex_anti_truncation: mode, ...(getLongDecode() === true ? { vertex_long_decode: true } : {}) });
     // The plugin rejects bodies over its limit; keep ST's own route for plain
     // anti-truncation. Image input never falls back to plaintext.
     if (payload && !imageEnabled && new TextEncoder().encode(payload).length > BODY_LIMIT) reason = "too-large";
@@ -135,15 +136,19 @@ export function createFetchInterceptor(originalFetch, { origin, getMode, getUnic
       }
     } catch (error) { onStatus({ error: "network" }); throw error; }
     if (direct && !reason) response = await direct.restore(response, prepared, init?.signal ?? (input instanceof Request ? input.signal : undefined));
+    const applied = Number(response.headers.get("x-gemini-output-tokens-applied"));
+    const outputLimit = !reason && applied > 0 ? { requested: Number(response.headers.get("x-gemini-output-tokens-requested")), applied,
+      longDecode: response.headers.get("x-gemini-long-decode") === "true" } : null;
     if (!response.ok) {
       // Plugin errors carry a fixed code; ST's own route keeps the HTTP status.
       const code = reason ? undefined : await response.clone().json().then(data => data?.error?.code, () => undefined);
       onStatus(typeof code === "string" && code ? { error: code, status: response.status } : { error: response.status });
-    } else if (!reason && (imageEnabled || body.type === "continue")) {
+    } else if (!reason && (imageEnabled || body.type === "continue" || outputLimit)) {
       // The plugin reports whether any text was converted; "no-text" was sent as plain text.
       // stream says whether ST asked to stream, since the plugin buffers every image request.
       onStatus({ mode,
         ...(unicode ? { unicode } : {}),
+        ...(outputLimit ? { outputLimit } : {}),
         ...(response.headers.get("x-vertex-continuation") === "suffix" ? { continuation: true } : {}),
         ...(imageEnabled ? { image: { mode: imageMode, reason: response.headers.get("x-image-input"),
           pages: Number(response.headers.get("x-image-input-pages")) || 0, stream: body.stream === true } } : {}) });

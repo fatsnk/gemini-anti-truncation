@@ -28,10 +28,62 @@ You can customize Gemini model IDs and client-facing names. Besides Google's Ver
 - Numeric `thinking_budget` / `thinkingBudget` and explicit `cached_content` fail locally with HTTP 400. Their budget or cache semantics are not silently discarded.
 - Sampling controls, penalties and `n` listed for removal by Google's migration checklist are omitted. The optional assistant-to-user prefill conversion now includes Argon; it only converts trailing plain text and preserves tool and thinking history.
 - The native Tavern plugin handles Argon thinking levels independently of older Tavern budget helpers. Your Tavern must still let you select or enter the model ID.
-- In the TauriTavern adaptation, TauriTavern itself handles Argon's thinking level and sampling parameters and must already list the model; the extension only checks the output limit. See the [TauriTavern section (Chinese)](SILLYTAVERN.md#tauritavern).
+- In the TauriTavern adaptation, TauriTavern itself handles Argon's thinking level and sampling parameters and must already list the model; the extension only caps a larger output limit at 65,536. See the [TauriTavern section (Chinese)](SILLYTAVERN.md#tauritavern).
 - Native function-call IDs and thought signatures round-trip in opaque `vtx4.` tool-call IDs. Clients must preserve these IDs when returning tool results.
-- Continuation-token long decode is not implemented. Each upstream unary request is limited to 32,768 output tokens and each upstream stream to 65,536, including thinking. Buffered anti-truncation uses the unary limit even when the client asks for SSE. Larger limits fail locally; the adaptation adds no automatic follow-up calls or token-limit increase. Existing explicitly enabled error retries keep their behavior.
+- Output limits above one request's maximum no longer fail; see [Output limits and long decode](#output-limits-and-long-decode).
 - For complex requests, the existing timeout may need to be raised to 900,000 ms or more. Updating does not change it automatically.
+
+## Output limits and long decode
+
+Google limits one Argon request to 65,536 output tokens when streamed and 32,768 when not, thinking included. Google's long decode continues a reply across further requests, up to 1,048,576 tokens minus the input, on the `v1beta1` API only. See the Long decodes section of the [Gemini 4 guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-argon).
+
+### Default: send the single-request limit
+
+Long decode is off by default. A larger output limit is sent as the limit of the request actually made to Google, streaming or not, instead of failing with `gemini4_long_decode_required`; no request is added. The value saved in the client or preset is not changed. Tavern's connection test sends only "Hi" but carries the preset's limit, and used to fail for that reason.
+
+| Entry point | Limit sent |
+| --- | --- |
+| Standalone gateway to Google (native or compatible API) | 65,536 when the request to Google streams, otherwise 32,768. Buffered anti-truncation is a unary request even when the client asks for SSE |
+| Standalone gateway, custom upstream | Always 32,768, since the gateway cannot see how the relay calls Google |
+| Requests the Tavern plugin takes | Same as direct. Connection tests, background generations (summaries, expression classification and similar extensions), streaming turned off, buffered mode and image input are unary: 32,768 |
+| TauriTavern | 65,536 (it always streams) |
+| Requests the plugin leaves to Tavern's own route | Unchanged |
+
+The `x-gemini-output-tokens-requested`, `x-gemini-output-tokens-applied` and `x-gemini-long-decode` headers and the gateway log's `outputLimit` record the requested limit, the limit sent and whether long decode applies; the Tavern panel shows the limit sent. Limits within one request are unaffected.
+
+### When a reply reaches the limit
+
+With long decode off, a reply that actually reaches the single-request limit:
+
+- Stops there with a length finish reason (Google's `MAX_TOKENS`, OpenAI's `length`). It is neither an error nor reported as complete.
+- Shares the limit with thinking: longer thinking leaves less text, and in the extreme case none.
+- Keeps the text already written with streaming anti-truncation. Buffered (unary) anti-truncation may return no text: a 2026-10-14 test on Gemini 3.7 Flash with a 300-token limit got only thinking and `MAX_TOKENS`, no function call, so the delivered text was empty. The thinking may have used up the 300 tokens first; this was not retested on Argon. Plain requests without anti-truncation keep the written text per Google's usual behavior; this project has not tested that specifically.
+- Can be extended with Tavern's Continue, which sends one more request billed as usual.
+
+### Turning long decode on
+
+In the standalone gateway, check "Gemini 4 Argon 超长回复自动续写" under 连接配置 → SillyTavern 兼容与重试, or set `GEMINI_LONG_DECODE=true` in CLI mode. In the Tavern plugin, check the option of the same name in the Vertex panel. Both are off by default and saved separately.
+
+- Only Argon requests whose limit exceeds one request's maximum are affected. They use the native `v1beta1` API with the client's limit (1,048,576 at most). When Google ends a request with `CONTINUATION` and a continuation token, the gateway or plugin sends the same request again with the token until Google finishes, and delivers one reply: a single finish reason and usage added up across the requests.
+- Requests are added only when a reply actually exceeds the single-request limit. A short reply is still one request at the same cost.
+- On the standalone gateway, requests that normally use the compatible endpoint (normal and buffered profiles in full mode) switch to the native API. Requests the native API cannot carry without loss, such as ones with `logprobs`, keep the single-request limit, with `x-gemini-long-decode: false`.
+- A custom upstream gets the client's limit unchanged; whether it supports that is up to the upstream.
+- TauriTavern: not available, and the limit stays 65,536. TauriTavern's backend sends the request, so the extension cannot follow continuation tokens.
+
+### Compatibility risks
+
+Before turning it on:
+
+- **Anti-truncation has not been tested with a real long reply.** Streaming anti-truncation assumes the continued request carries on with the same function argument. If Google restarts it or changes its structure, the reply ends with an error starting with `anti_truncation_native_`; incomplete text is not reported as a complete reply. How a function call spans requests in buffered mode is unknown, and may fail the same way.
+- **Express, Flex and Priority on `v1beta1` are untested.** On 2026-10-20 only short requests that did not continue were sent, with a service account, Standard and `global`.
+- **Cost.** Each continuation resends the full context and is billed for input again. Google's implicit caching may discount it; prices were not checked. The gateway log adds usage and cost estimates across all requests.
+- **Waiting time.** The whole request, continuations included, stays within the upstream timeout: 10 minutes by default on the standalone gateway (up to 30 in settings), fixed at 10 minutes in the Tavern plugin. A very long reply may time out.
+- **Failures midway.** A streamed reply cannot take back what it already sent and ends with an error event; a unary reply fails as a whole and the written text is not delivered. Nothing is retried automatically. A continuation that produces no output stops the loop with `long_decode_no_progress`.
+- **Overall limit.** What Google does when input plus output exceed the model's total limit is untested.
+
+### Validation status
+
+Offline tests with simulated responses cover the cap for each entry point, joining unary and streamed continuations, failed continuations and the no-progress stop. Three short live requests were sent on 2026-10-20 (service account, Standard, `global`, about 180 input and 40 output tokens each): with long decode on, streamed and unary `v1beta1` requests accepted a 100,000 limit and finished in one request; with it off, a buffered request was sent with 32,768 and succeeded. A reply that actually continues across requests has not been tested live; the behavior will be adjusted from feedback by users who need long outputs.
 
 ## Local errors
 
@@ -40,7 +92,7 @@ You can customize Gemini model IDs and client-facing names. Besides Google's Ver
 | `invalid_gemini4_thinking_level` | Use low, medium or high; use `thinking_level` inside an explicit Google config. |
 | `unsupported_gemini4_thinking_budget` | Remove the numeric budget and use a thinking level. |
 | `unsupported_gemini4_cached_content` | Remove the explicit cache reference. |
-| `gemini4_long_decode_required` | Reduce the limit to fit the actual unary or streaming upstream transport. |
+| `gemini4_long_decode_required` | Returned only by a gateway or Tavern server plugin from before this change. Update, or lower the limit to 32,768 (unary) / 65,536 (streaming). |
 | `invalid_tool_history` | Restore the complete tool-call ID returned by the server before resending. |
 
 ## Parent router

@@ -8,7 +8,7 @@ export { MODEL_ID, UPSTREAM_MODEL };
 export const DEFAULT_SETTINGS = Object.freeze({
   projectId: "", location: "global", authMode: "service-account", serviceTier: "standard",
   port: 4781, timeoutMs: 600000, antiTruncation: true, models: null,
-  hideUnavailableModels: true, geminiPrefillToUser: true, unicodeInput: false, imageInput: "off",
+  hideUnavailableModels: true, geminiPrefillToUser: true, geminiLongDecode: false, unicodeInput: false, imageInput: "off",
   geminiPromptRetryEnabled: false, geminiPromptRetryText: "", geminiPromptRetryMatches: null, customBaseUrl: "",
   gatewayKey: "", serviceAccountJson: "", apiKey: "", accessToken: "", customApiKey: "",
 });
@@ -57,7 +57,7 @@ export async function settingsFromEnv(env = process.env) {
     antiTruncation: env.ANTI_TRUNCATION !== "false",
     unicodeInput: toggle("UNICODE_INPUT", false), imageInput: env.IMAGE_INPUT || "off",
     hideUnavailableModels: toggle("HIDE_UNAVAILABLE_MODELS", true),
-    geminiPrefillToUser: toggle("GEMINI_PREFILL_TO_USER", true),
+    geminiPrefillToUser: toggle("GEMINI_PREFILL_TO_USER", true), geminiLongDecode: toggle("GEMINI_LONG_DECODE", false),
     geminiPromptRetryEnabled: toggle("GEMINI_PROMPT_RETRY_ENABLED", false), geminiPromptRetryText,
     geminiPromptRetryMatches: retryMatches.length ? retryMatches : null,
   };
@@ -130,7 +130,7 @@ export function buildConfig(settings, { requireAscii = true } = {}) {
   if (!["off", "current-turn", "all"].includes(s.imageInput)) throw new Error("Invalid image input mode");
   if (s.unicodeInput && s.imageInput !== "off") throw new Error("Unicode and image input are mutually exclusive");
   if (typeof s.antiTruncation !== "boolean") throw new Error("Invalid anti-truncation setting");
-  for (const name of ["hideUnavailableModels", "geminiPrefillToUser", "geminiPromptRetryEnabled", "unicodeInput"]) {
+  for (const name of ["hideUnavailableModels", "geminiPrefillToUser", "geminiLongDecode", "geminiPromptRetryEnabled", "unicodeInput"]) {
     if (typeof s[name] !== "boolean") throw new Error("Invalid compatibility toggle");
   }
   if (typeof s.geminiPromptRetryText !== "string" || Buffer.byteLength(s.geminiPromptRetryText) > MAX_RETRY_TEXT_BYTES) {
@@ -145,7 +145,7 @@ export function buildConfig(settings, { requireAscii = true } = {}) {
   const models = modelProfiles(s.models, s.antiTruncation, { custom: s.authMode === "custom" });
   return {
     ...buildConnectionConfig(s, { requireAscii }), gatewayKey: key, models,
-    hideUnavailableModels: s.hideUnavailableModels, geminiPrefillToUser: s.geminiPrefillToUser, unicodeInput: s.unicodeInput, imageInput: s.imageInput,
+    hideUnavailableModels: s.hideUnavailableModels, geminiPrefillToUser: s.geminiPrefillToUser, geminiLongDecode: s.geminiLongDecode, unicodeInput: s.unicodeInput, imageInput: s.imageInput,
     geminiPromptRetry: { enabled: s.geminiPromptRetryEnabled, text: s.geminiPromptRetryText, ...(matches ? { errorMatches: matches } : {}) },
     // Legacy fields remain available to CLI integrations; profiles own behavior.
     model: models[0]?.id || MODEL_ID, upstreamModel: models[0]?.upstreamModel || UPSTREAM_MODEL,

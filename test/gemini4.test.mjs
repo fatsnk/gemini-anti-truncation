@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isGemini4Argon, prepareGemini4Request, validateGemini4Output, encodeGemini4ToolId, gemini4ToolMetadata } from "../src/gemini4.mjs";
+import { isGemini4Argon, prepareGemini4Request, capGemini4Output, gemini4OutputLimit, encodeGemini4ToolId, gemini4ToolMetadata } from "../src/gemini4.mjs";
 import { convertGeminiPrefill } from "../src/gemini-compat.mjs";
 
 const model = "google/gemini-4-argon";
@@ -24,17 +24,32 @@ test("Gemini 4 thinking uses levels, preserves explicit config and caller data",
   assert.equal(isGemini4Argon("gemini-4-argon-invented"), false);
 });
 
-test("Gemini 4 rejects numeric budgets, explicit cache and unsupported long decode locally", () => {
+test("Gemini 4 rejects numeric budgets and explicit cache locally", () => {
   for (const field of ["thinking_budget", "thinkingBudget"]) {
     assert.throws(() => prepareGemini4Request({ extra_body: { google: { thinking_config: { [field]: 1024 } } } }, model), { status: 400, code: "unsupported_gemini4_thinking_budget" });
   }
   assert.throws(() => prepareGemini4Request({ extra_body: { google: { cached_content: "fixture-cache" } } }, model), { status: 400, code: "unsupported_gemini4_cached_content" });
   assert.throws(() => prepareGemini4Request({ reasoning_effort: "invalid" }, model), { status: 400, code: "invalid_gemini4_thinking_level" });
-  for (const stream of [false, true]) {
+});
+
+test("Gemini 4 output ceilings over one request's limit are capped, or kept for long decode", () => {
+  for (const stream of [false, true]) for (const field of ["max_tokens", "max_completion_tokens"]) {
     const limit = stream ? 65536 : 32768;
-    assert.doesNotThrow(() => validateGemini4Output({ max_tokens: limit }, model, stream));
-    assert.throws(() => validateGemini4Output({ max_completion_tokens: limit + 1 }, model, stream), { status: 400, code: "gemini4_long_decode_required" });
+    for (const requested of [undefined, 128, limit, "100000"]) {
+      const input = { [field]: requested };
+      assert.deepEqual(capGemini4Output(input, model, { stream }), { payload: input, outputLimit: null });
+    }
+    const input = { [field]: 100000, messages: [{ role: "user", content: "Hi" }] };
+    const original = structuredClone(input);
+    const capped = capGemini4Output(input, model, { stream });
+    assert.equal(capped.payload[field], limit);
+    assert.deepEqual(capped.outputLimit, { requested: 100000, applied: limit, longDecode: false });
+    assert.deepEqual(input, original);
+    assert.equal(capGemini4Output(input, model, { stream, longDecode: true }).payload[field], 100000);
+    assert.strictEqual(capGemini4Output(input, "gemini-3.8-flash", { stream }).payload, input);
   }
+  assert.deepEqual(gemini4OutputLimit(2000000, model, { longDecode: true }), { requested: 2000000, applied: 1048576, longDecode: true });
+  assert.deepEqual(gemini4OutputLimit(65536, model, { stream: true, limit: 32768 }), { requested: 65536, applied: 32768, longDecode: false });
 });
 
 test("Gemini 4 text prefills follow the opt-in conversion and preserve tool history", () => {

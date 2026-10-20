@@ -196,16 +196,21 @@ test("Continue asks for the suffix only and is confirmed without a server plugin
   assert.deepEqual(JSON.parse(sent.custom_include_body).tools, JSON.parse(original.calls[1].sent.custom_include_body).tools);
 });
 
-test("Gemini 4 Argon output limits are checked before TauriTavern sends anything", async () => {
+test("TauriTavern caps Gemini 4 Argon output at its streaming limit, once, and reports it", async () => {
   const original = host(name => new Response(call({ name, args: { content: "好" } }) + finish() + done));
   const statuses = [];
-  const wrapped = intercept(original, "buffered", { onStatus: status => statuses.push(status) });
-  await assert.rejects(send(wrapped, { model: "gemini-4-argon", max_tokens: 65537 }), { code: "gemini4_long_decode_required" });
-  assert.deepEqual(statuses, [{ error: "gemini4_long_decode_required" }]);
-  assert.equal(original.calls.length, 0);
+  // A long-decode setting cannot reach TauriTavern's backend, which sends the request itself.
+  const wrapped = intercept(original, "buffered", { onStatus: status => statuses.push(status), getLongDecode: () => true });
   // The upstream request always streams here, so the streaming limit applies to both modes.
-  const result = await (await send(wrapped, { model: "gemini-4-argon", max_tokens: 65536, stream: false })).json();
+  const result = await (await send(wrapped, { model: "gemini-4-argon", max_tokens: 100000, stream: false })).json();
   assert.equal(result.choices[0].message.content, "好");
+  assert.equal(original.calls.length, 1);
+  assert.equal(original.calls[0].sent.max_tokens, 65536);
+  assert.equal(original.calls[0].sent.vertex_long_decode, undefined);
+  assert.deepEqual(statuses.at(-1), { mode: "buffered", outputLimit: { requested: 100000, applied: 65536, longDecode: false } });
+  await send(wrapped, { model: "gemini-4-argon", max_tokens: 65536 });
+  assert.equal(original.calls[1].sent.max_tokens, 65536);
+  assert.equal(statuses.at(-1).outputLimit, undefined);
 });
 
 test("requests the transport cannot carry and other providers keep TauriTavern's route unchanged", async () => {

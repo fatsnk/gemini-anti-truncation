@@ -30,7 +30,12 @@ export function wrapNativeTextStream(response, toolName, model, onNativeUsage = 
     }
     if (fc.partialArgs != null && !Array.isArray(fc.partialArgs)) fail("invalid_partial_args");
     for (const part of fc.partialArgs ?? []) {
-      if (fullArgs || stringClosed || part.jsonPath !== "$.content" || typeof part.stringValue !== "string") fail("invalid_partial_args");
+      if (!isObject(part) || fullArgs || stringClosed || part.jsonPath !== "$.content" ||
+        ["numberValue", "boolValue", "nullValue"].some(key => Object.hasOwn(part, key))) fail("invalid_partial_args");
+      // Google can close a streamed string with only its jsonPath. Accept that
+      // marker only after a string fragment, so missing values cannot start one.
+      const closesString = stringStarted && !Object.hasOwn(part, "stringValue") && part.willContinue !== true;
+      if (typeof part.stringValue !== "string" && !closesString) fail("invalid_partial_args");
       if (!stringStarted) { args(emit, '{"content":"'); stringStarted = true; }
       if (part.stringValue) args(emit, JSON.stringify(part.stringValue).slice(1, -1));
       if (part.willContinue !== true) { args(emit, '"'); stringClosed = true; }

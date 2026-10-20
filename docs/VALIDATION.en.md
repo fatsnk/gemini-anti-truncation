@@ -2,6 +2,24 @@
 
 [中文](VALIDATION.md) | English
 
+## Gemini 4 Argon output limits and long decode (2026-10-20, `main` source update)
+
+All 237 offline tests passed. New and rewritten coverage:
+
+- Caps: Express and full mode on the standalone gateway × normal, buffered and streaming profiles × client streaming on/off × `max_tokens` and `max_completion_tokens`, 24 combinations, each with one upstream request and matching headers and logs; a custom upstream at 32,768 with long decode off and unchanged with it on; the Tavern plugin's connection test (quiet), buffered and image-input requests; TauriTavern at 65,536.
+- Long decode: three unary requests joined; two streamed requests joined (with a mid-stream checkpoint token, usage added up and a single finish reason); a failed later request; an interrupted request that is not continued; the no-progress stop. On the gateway, the native API, full mode switched from the compatible endpoint to the native one, and a streamed anti-truncation argument joined across requests; in the Tavern plugin, the URL and limit with the option off and on.
+- The streamed anti-truncation cases assume the continued request carries on with the same function argument; that has no live evidence.
+
+Live requests (short requests permitted by the user, reusing the service account from the local environment, credentials unchanged): 3 calls, Gemini 4 Argon, `global`, Standard, LOW thinking, a client limit of 100,000 and a prompt asking for one word.
+
+| Request | Result |
+| --- | --- |
+| Long decode on, streaming anti-truncation | `v1beta1` streamGenerateContent accepted `maxOutputTokens` 100,000; one request, restored to OK, stop; 181 input and 42 output tokens |
+| Long decode on, buffered (full mode switched from the compatible endpoint to native) | `v1beta1` generateContent accepted 100,000; one request, OK, stop; 185 input and 44 output tokens |
+| Long decode off, buffered | `v1` compatible endpoint with `max_tokens` 32,768; one request, OK, stop; 185 input and 44 output tokens |
+
+The gateway's built-in prices estimate about USD 0.0024 in total. Not covered: a reply that continues across requests, Express/Flex/Priority on `v1beta1`, live Tavern plugin requests, the installed Tavern interface, TauriTavern on a device, and long-form quality.
+
 ## Docker gateway 0.8.0 (2026-10-16)
 
 All 206 offline tests passed on Windows and inside a Linux amd64 container. Compose checks cover initial setup, Host/Origin/CSRF and API authentication, published ports, service-name networking, non-root/read-only operation, CJK WebP rendering, persistence across recreation, health and graceful shutdown. The ARM64 image also receives a locally emulated Compose check; this is not an ARM hardware performance test.
