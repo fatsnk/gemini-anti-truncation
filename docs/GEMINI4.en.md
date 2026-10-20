@@ -35,6 +35,8 @@ You can customize Gemini model IDs and client-facing names. Besides Google's Ver
 
 ## Output limits and long decode
 
+This section ships in standalone gateway 0.11.0 and SillyTavern integration 0.6.0; earlier versions fail an oversized limit with `gemini4_long_decode_required`.
+
 Google limits one Argon request to 65,536 output tokens when streamed and 32,768 when not, thinking included. Google's long decode continues a reply across further requests, up to 1,048,576 tokens minus the input, on the `v1beta1` API only. See the Long decodes section of the [Gemini 4 guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-argon).
 
 ### Default: send the single-request limit
@@ -83,7 +85,7 @@ Before turning it on:
 
 ### Validation status
 
-Offline tests with simulated responses cover the cap for each entry point, joining unary and streamed continuations, failed continuations and the no-progress stop. Three short live requests were sent on 2026-10-20 (service account, Standard, `global`, about 180 input and 40 output tokens each): with long decode on, streamed and unary `v1beta1` requests accepted a 100,000 limit and finished in one request; with it off, a buffered request was sent with 32,768 and succeeded. A reply that actually continues across requests has not been tested live; the behavior will be adjusted from feedback by users who need long outputs.
+Offline tests with simulated responses cover the cap for each entry point, joining unary and streamed continuations, failed continuations and the no-progress stop. Only short live requests were sent on 2026-10-20 (service account, Standard, `global`, three before and three after combining the release code, about 140–185 input and 20–45 output tokens each): with long decode on, streamed and unary `v1beta1` requests accepted a 100,000 limit and finished in one request; with it off, a buffered request was sent with 32,768 and succeeded. A reply that actually continues across requests has not been tested live; the behavior will be adjusted from feedback by users who need long outputs.
 
 ## Local errors
 

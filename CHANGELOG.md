@@ -2,26 +2,29 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
-## Unreleased — Gemini 4 Argon output limits and optional long decode
+## Standalone gateway 0.11.0 and SillyTavern integration 0.6.0 — Gemini 4 Argon output limits, optional long decode and cacheable anti-truncation
 
-Changes on `main`; versions stay at standalone gateway 0.10.2 and SillyTavern integration 0.5.3. Affects the standalone gateway, the Tavern server plugin and UI extension, and the TauriTavern adaptation.
+Tags `gateway-v0.11.0` (Docker image `0.11.0`) and `sillytavern-v0.6.0` (one-step package) share these changes. They affect the standalone gateway, the SillyTavern server plugin and UI extension, and the TauriTavern adaptation. The prepared 0.10.2 / 0.5.3 was never released; its changes are included here.
+
+Output limits and long decode:
 
 - Gemini 4 Argon output limits above one request's maximum no longer fail with `gemini4_long_decode_required`. They are sent as the maximum of the request actually made to Google: 65,536 when it streams, otherwise 32,768 (buffered anti-truncation, Tavern's connection test and background generations, image input). A custom upstream always gets 32,768 and TauriTavern 65,536. Requests the Tavern plugin leaves to Tavern's own route are unchanged, and saved presets are not modified. The `x-gemini-output-tokens-requested`, `x-gemini-output-tokens-applied` and `x-gemini-long-decode` headers, the gateway log's `outputLimit` and the Tavern panel report the limit sent.
 - New opt-in "Gemini 4 Argon 超长回复自动续写" (long decode), off by default, in the gateway console (`GEMINI_LONG_DECODE` in CLI mode) and the Tavern Vertex panel. Argon requests over the single-request limit then use the native `v1beta1` API. When Google ends a request with `CONTINUATION`, the request is sent again with its continuation token until Google finishes, and the parts are joined into one reply with usage added up. Requests are added only when a reply actually exceeds the limit. On the gateway, compatible-endpoint requests switch to the native API when it can carry them; a custom upstream gets the client's limit unchanged. Not available in TauriTavern.
 - Known long-decode risks are listed in [Gemini 4](docs/GEMINI4.en.md#output-limits-and-long-decode): anti-truncation across continued requests is untested with real long replies; Express, Flex and Priority on `v1beta1` are untested; each continuation resends and bills the full context; the whole request stays within the upstream timeout; a failure midway ends a stream with an error event and fails a unary reply.
 - When an older Tavern server plugin still returns `gemini4_long_decode_required`, the panel asks to update it.
 - Native argument streams also accept the string terminator shown in Google's example: a fragment with only `jsonPath` and no value, once the text has started. Missing values, other value types and misplaced terminators still fail. The standalone gateway, the Tavern plugin and TauriTavern share this parser.
-- Validation: 237 offline tests passed, including simulated multi-request continuations. Three short live requests (service account, Standard, `global`) confirmed that streamed and unary `v1beta1` Argon requests accept a 100,000 limit and finish in one request, and that a buffered request capped at 32,768 succeeds. No reply that continues across requests was tested live.
-## Standalone gateway 0.10.2 and SillyTavern integration 0.5.3 — anti-truncation requests can hit the Vertex cache
 
-Tags `gateway-v0.10.2` (Docker image `0.10.2`) and `sillytavern-v0.5.3` (one-step package) share this fix.
+Prompt caching with anti-truncation:
 
-- The synthetic anti-truncation tool is now always named `router_emit` instead of a fresh random name per request (`router_emit_` plus 24 hex digits). Tool declarations come before the prompt, so a changing name made every request start differently: Vertex implicit caching never matched, and character settings and chat history were billed at full price every turn. This affects the standalone gateway, the SillyTavern server plugin and the TauriTavern adaptation.
+- The synthetic anti-truncation tool is now always named `router_emit` instead of a fresh random name per request (`router_emit_` plus 24 hex digits). Tool declarations come before the prompt, so a changing name made every request start differently: Vertex implicit caching never matched, and character settings and chat history were billed at full price every turn.
 - Continue no longer switches to a different tool description; only the final instruction differs, so it shares the cache with ordinary requests.
 - Since 0.9.0 client tools are declared next to the synthetic tool. If a client tool's name starts with `router_emit`, that request uses a random name (`router_` plus 24 hex digits) so its real calls are not taken for the synthetic one; only that request misses the cache.
-- Live comparison in an isolated SillyTavern (Gemini 4 Argon, Standard, `global`, a real preset prompt and a constructed next turn): with anti-truncation off, the next turn reused 49.7% of the prompt (17,265 of 34,713 tokens); with streaming anti-truncation and a fixed name, 49.7% (17,315 of 34,810); with 0.5.2's random names, 0. That run used an earlier build of this fix on 0.8.0 with the same name and description; the 0.10.2 / 0.5.3 code has not been sent to a live model.
-- Update the half that actually runs: the server plugin in SillyTavern (a Git install updates itself when Tavern starts), the extension in TauriTavern, or the gateway source or image.
-- Validation: 219 offline tests passed, including a new one for a client tool named `router_emit` or `router_emit_v2` in buffered and streamed replies.
+- Live comparison in an isolated SillyTavern (Gemini 4 Argon, Standard, `global`, a real preset prompt and a constructed next turn): with anti-truncation off, the next turn reused 49.7% of the prompt (17,265 of 34,713 tokens); with streaming anti-truncation and a fixed name, 49.7% (17,315 of 34,810); with 0.5.2's random names, 0. That run used an earlier build of this fix on 0.8.0. A later run with this release's naming sent byte-identical requests and got no cached tokens that time: implicit caching is not guaranteed, so a fixed name makes a hit possible rather than certain.
+
+Updating and validation:
+
+- Update the half that actually runs: the server plugin in SillyTavern (a Git install updates itself when Tavern starts) together with the extension, the extension in TauriTavern, or the gateway source or image.
+- Validation: 237 offline tests passed, including simulated multi-request continuations and client tools named `router_emit` or `router_emit_v2`. Short live Argon requests (service account, Standard, `global`), three before and three after combining the changes, confirmed that streamed and unary `v1beta1` requests accept a 100,000 limit and finish in one request, and that a buffered request capped at 32,768 succeeds. No reply that continues across requests was tested live.
 
 ## Standalone gateway 0.10.1 and SillyTavern integration 0.5.2 — Express global routing
 

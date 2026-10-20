@@ -2,7 +2,7 @@
 
 [中文](VALIDATION.md) | English
 
-## Gemini 4 Argon output limits and long decode (2026-10-20, `main` source update)
+## Standalone gateway 0.11.0 and SillyTavern integration 0.6.0: Gemini 4 Argon output limits and long decode (2026-10-20)
 
 All 237 offline tests passed. New and rewritten coverage:
 
@@ -18,7 +18,7 @@ Live requests (short requests permitted by the user, reusing the service account
 | Long decode on, buffered (full mode switched from the compatible endpoint to native) | `v1beta1` generateContent accepted 100,000; one request, OK, stop; 185 input and 44 output tokens |
 | Long decode off, buffered | `v1` compatible endpoint with `max_tokens` 32,768; one request, OK, stop; 185 input and 44 output tokens |
 
-The gateway's built-in prices estimate about USD 0.0024 in total. Not covered: a reply that continues across requests, Express/Flex/Priority on `v1beta1`, live Tavern plugin requests, the installed Tavern interface, TauriTavern on a device, and long-form quality.
+After the fixed tool name was merged, the same 3 requests were sent again with the release code: URLs, limits and finish reasons matched the table, with 140 input and 22 output tokens each (the tool description is shorter). The gateway's built-in prices estimate about USD 0.004 for both rounds. Not covered: a reply that continues across requests, Express/Flex/Priority on `v1beta1`, live Tavern plugin requests, the installed Tavern interface, TauriTavern on a device, and long-form quality.
 
 ## Docker gateway 0.8.0 (2026-10-16)
 
