@@ -292,6 +292,17 @@ test("real tool calls reach ST as whole Gemini parts beside the restored text", 
   assert.deepEqual(result.responseContent.parts, [{ text: "好" }, argonPart]);
 });
 
+test("a streamed call to a client tool named like the start of the transport tool reaches ST", async () => {
+  const realPart = { functionCall: { name: "router", args: { query: "天气" } }, thoughtSignature: "sig-new" };
+  const prepared = prepareSillyTavernRequest(request({ tools: [{ ...lookupTool, function: { ...lookupTool.function, name: "router" } }],
+    vertex_anti_truncation: "streaming", stream: true }), adapters);
+  const parts = [{ functionCall: { name: prepared.toolName, args: { content: "我去查。" } } }, realPart];
+  const text = await (await restoreSillyTavernResponse(new Response(sseData({ candidates: [{ content: { role: "model", parts } }] }) +
+    sseData({ candidates: [{ finishReason: "STOP" }] })), prepared)).text();
+  assert.equal(contents(text), "我去查。");
+  assert.deepEqual(events(text).flatMap(event => event.candidates?.[0]?.content?.parts?.filter(part => part.functionCall) ?? []), [realPart]);
+});
+
 test("SillyTavern credentials stay per-user and selected secret; destinations cannot be overridden", () => {
   const reads = [];
   const input = request({ secret_id: "selected" });

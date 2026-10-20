@@ -294,7 +294,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
           if (transport.nativeStreaming) upstream = wrapNativeTextStream(upstream, transport.toolName, route.id, usage => { audit.trafficType = usage?.trafficType; audit.usage = translateUsage(usage); }, includeUsage);
           else if (native) upstream = wrapNativeStream(upstream, route.id, usage => { audit.trafficType = usage?.traffic_type; audit.usage = usage; }, includeUsage);
           upstream = aliasStream(upstream, route.id, metadata => Object.assign(audit, metadata), includeUsage);
-          upstream = wrapAntiTruncationStream(upstream, transport.toolName, metadata => Object.assign(audit, metadata));
+          upstream = wrapAntiTruncationStream(upstream, transport.toolName, metadata => Object.assign(audit, metadata), transport.payload.tools);
         }
         upstream = guardCompletionStream(upstream, metadata => { integrity = metadata; }, expectation, config.bodyLimitBytes);
         if (!upstream.body) throw new Problem(502, "empty_upstream_stream");

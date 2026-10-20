@@ -256,8 +256,9 @@ export function restoreAntiTruncationCompletion(completion, toolName) {
 // Ordinary text is streamed immediately. The first nonempty text channel wins;
 // later ordinary/synthetic text is suppressed instead of duplicated.
 class StreamRestorer {
-    constructor(toolName) {
+    constructor(toolName, tools) {
         this.toolName = toolName;
+        this.tools = new Set(tools.map(tool => tool?.function?.name));
         this.choices = new Map();
         this.restored = false;
         this.failed = false;
@@ -285,7 +286,9 @@ class StreamRestorer {
         slot.pending.push(call);
         if (slot.kind === "unknown") {
             if (slot.name === this.toolName) slot.kind = "synthetic";
-            else if (!this.toolName.startsWith(slot.name)) slot.kind = "real";
+            // A declared tool named like the start of the synthetic one ("router") is complete
+            // once its arguments begin; any other prefix waits for the rest of the name.
+            else if (!this.toolName.startsWith(slot.name) || (call.function?.arguments && this.tools.has(slot.name))) slot.kind = "real";
             else {
                 if (slot.pendingBytes > 64 * 1024) throw failure("anti_truncation_tool_metadata_limit");
                 return { kept: [], text: "" };
@@ -360,9 +363,9 @@ class StreamRestorer {
     }
 }
 
-export function wrapAntiTruncationStream(response, toolName, onMetadata = () => {}) {
+export function wrapAntiTruncationStream(response, toolName, onMetadata = () => {}, tools = []) {
     if (!toolName || !response.ok || !response.body) return response;
-    const processor = new StreamRestorer(toolName);
+    const processor = new StreamRestorer(toolName, tools);
     let done = false;
     return transformSse(response, ({ raw, lines, data, event }, emit) => {
         if (!data) { emit(raw + "\n\n"); return; }

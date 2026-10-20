@@ -122,6 +122,24 @@ test("a client tool named like the synthetic tool keeps its calls, buffered and 
   }
 });
 
+test("a client tool whose name begins the synthetic name streams through once its arguments start", async () => {
+  const tools = [{ type: "function", function: { name: "router" } }];
+  const prepared = prepareAntiTruncation({ ...payload, tools }, true);
+  assert.equal(prepared.toolName, "router_emit");
+  // The synthetic name still arrives in pieces, the first of which spells the client name.
+  const text = [{ index: 0, id: "call-text", type: "function", function: { name: "router", arguments: "" } },
+    { index: 0, function: { name: "_emit" } }, { index: 0, function: { arguments: JSON.stringify({ content: "text" }) } }];
+  // Vertex sends a real call whole; OpenAI-style upstreams send the name before the arguments.
+  for (const real of [[{ ...call("{}", "router", 1), id: "call-real" }],
+    [{ index: 1, id: "call-real", type: "function", function: { name: "router", arguments: "" } }, { index: 1, function: { arguments: "{}" } }]]) {
+    const body = [...[...text, ...real].map(piece => event(chunk({ tool_calls: [piece] }))), event(chunk({}, "tool_calls")), event("[DONE]")].join("");
+    const records = parse(await wrapAntiTruncationStream(new Response(body), prepared.toolName, () => {}, prepared.payload.tools).text());
+    assert.equal(contents(records), "text");
+    assert.deepEqual(records.flatMap(record => record.choices[0].delta.tool_calls ?? []), real.map(piece => ({ ...piece, index: 0 })));
+    assert.equal(records.at(-1).choices[0].finish_reason, "tool_calls");
+  }
+});
+
 test("experimental streaming selects native only for translatable text requests and preserves fallback fields", () => {
   const request = { model: payload.model, messages: payload.messages, stream: true,
     extra_body: { google: { thinking_config: { thinking_budget: 128 } } } };

@@ -77,7 +77,7 @@ export function prepareSillyTavernRequest(request, adapters) {
   validateGemini4Output(body, body.model, upstreamStream);
   // Streamed arguments are read only for the transport call alone; client tools arrive whole.
   if (upstreamStream && !clientTools) native.toolConfig.functionCallingConfig.streamFunctionCallArguments = true;
-  return { body: native, toolName: prepared.toolName, model: body.model, stream: body.stream === true, upstreamStream, mode, continuation, clientTools };
+  return { body: native, toolName: prepared.toolName, model: body.model, stream: body.stream === true, upstreamStream, mode, continuation, clientTools, tools: prepared.payload.tools };
 }
 
 const finishReasons = { stop: "STOP", length: "MAX_TOKENS", content_filter: "SAFETY", tool_calls: "STOP" };
@@ -167,7 +167,7 @@ export async function restoreSillyTavernResponse(upstream, prepared) {
     let usageMetadata;
     const translated = prepared.clientTools ? wrapNativeStream(upstream, prepared.model)
       : wrapNativeTextStream(upstream, prepared.toolName, prepared.model, usage => { usageMetadata = usage; });
-    const restored = wrapAntiTruncationStream(translated, prepared.toolName);
+    const restored = wrapAntiTruncationStream(translated, prepared.toolName, () => {}, prepared.tools);
     return toSillyTavernStream(guardCompletionStream(restored, () => {}, null, BODY_LIMIT), () => usageMetadata, prepared.model);
   }
   const raw = await readJson(upstream);

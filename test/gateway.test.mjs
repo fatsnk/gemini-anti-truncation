@@ -351,6 +351,22 @@ test("client tool calls pass through beside the restored text on compatible and 
   }
 });
 
+test("a streamed client tool named like the start of the transport tool still passes through", async t => {
+  const router = { name: "router", arguments: "{}" };
+  const line = value => "data: " + JSON.stringify(value) + "\n\n";
+  const f = await fixture(t, request => {
+    const calls = [{ id: "transport-id", type: "function", function: { name: request.json.tools[1].function.name, arguments: '{"content":"checking"}' } },
+      { id: "router-id", type: "function", function: router }];
+    return new Response(line({ choices: [{ index: 0, delta: { role: "assistant", tool_calls: calls.map((call, index) => ({ index, ...call })) }, finish_reason: null }] }) +
+      line({ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] }) + "data: [DONE]\n\n");
+  });
+  const wire = await (await f.post({ ...payload, tools: [{ type: "function", function: { name: "router" } }], stream: true })).text();
+  const deltas = records(wire).map(record => record.choices?.[0]).filter(Boolean);
+  assert.equal(visible(wire), "checking");
+  assert.deepEqual(deltas.flatMap(choice => choice.delta?.tool_calls ?? []), [{ index: 0, id: "router-id", type: "function", function: router }]);
+  assert.equal(deltas.at(-1).finish_reason, "tool_calls");
+});
+
 test("the log records token usage and a list-price estimate, asking a compatible stream for usage it then hides", async t => {
   const usage = { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1500, prompt_tokens_details: { cached_tokens: 400 } };
   const line = value => "data: " + JSON.stringify(value) + "\n\n";
