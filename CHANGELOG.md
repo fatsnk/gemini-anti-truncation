@@ -2,6 +2,13 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
+## SillyTavern integration 0.6.1 — shorter long-decode description
+
+Tag `sillytavern-v0.6.1` (one-step package). The standalone gateway and its Docker image stay at 0.11.0.
+
+- The description under the Vertex panel's long-decode option no longer mentions Continue or the untested combinations with anti-truncation, Express, Flex and Priority. Behavior is unchanged, and the risks remain listed in [Gemini 4](docs/GEMINI4.en.md#output-limits-and-long-decode).
+- Only the UI extension changed. A 0.6.0 server plugin keeps working with it; the panel's connection check then suggests updating the server plugin as well.
+
 ## Standalone gateway 0.11.0 and SillyTavern integration 0.6.0 — Gemini 4 Argon output limits, optional long decode and cacheable anti-truncation
 
 Tags `gateway-v0.11.0` (Docker image `0.11.0`) and `sillytavern-v0.6.0` (one-step package) share these changes. They affect the standalone gateway, the SillyTavern server plugin and UI extension, and the TauriTavern adaptation. The prepared 0.10.2 / 0.5.3 was never released; its changes are included here.

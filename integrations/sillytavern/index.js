@@ -144,9 +144,8 @@ function mount() {
     });
     longDecode.append(box, Object.assign(document.createElement("span"), { textContent: "Gemini 4 Argon 超长回复自动续写（long decode，实验）" }));
     panel.append(longDecode, Object.assign(document.createElement("small"), { textContent:
-      "关闭时，最大回复长度超过单次上限（流式 65,536、非流式 32,768 token，含思考）会按单次上限发送，不再报错；回复写满就停止并标记为长度截断，非流式抗截断写满时可能拿不到正文，可点“继续”接着写。"
-      + "开启后改用 Google 的 v1beta1 接口，写满后自动续写并拼成一条回复，最多写到预设的长度。只有真写超单次上限才会追加请求；每续写一段都重发完整上下文，费用和等待时间随之增加，整次请求最长 10 分钟。"
-      + "与抗截断传输及 Express、Flex、Priority 的配合尚未用真实超长输出验证，可能中途失败。" }));
+      "关闭时，最大回复长度超过单次上限（流式 65,536、非流式 32,768 token，含思考）会按单次上限发送，不再报错；回复写满就停止并标记为长度截断，非流式抗截断写满时可能拿不到正文。"
+      + "开启后改用 Google 的 v1beta1 接口，写满后自动续写并拼成一条回复，最多写到预设的长度。只有真写超单次上限才会追加请求；每续写一段都重发完整上下文，费用和等待时间随之增加，整次请求最长 10 分钟。" }));
   }
   panel.append(status, direct ? Object.assign(document.createElement("small"),
     { textContent: "TauriTavern：抗截断由本扩展直接完成，无需服务端插件；不支持图片输入和超长回复自动续写。" }) : check);
