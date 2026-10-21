@@ -594,6 +594,33 @@ test("Unicode floor comes from the latest real user, including empty-floor failu
   assert.equal(latestUserFloor(undefined), "");
 });
 
+test("Unicode input falls back to the 我的行动 variable only when there is no user floor", async () => {
+  const { latestUserInput } = await import("../integrations/sillytavern/shared.js");
+  const vars = { 我的行动: "推开门" };
+  assert.equal(latestUserInput([{ is_user: true, mes: "楼层" }], vars), "楼层");
+  assert.equal(latestUserInput([{ is_user: false, mes: "开局" }], vars), "推开门");
+  assert.equal(latestUserInput([{ is_user: true, mes: "" }], vars), "推开门");
+  assert.equal(latestUserInput([], { 我的行动: 3 }), "");
+  assert.equal(latestUserInput([], undefined), "");
+});
+
+test("single-floor card: Unicode encodes every copy of the 我的行动 text and keeps tag lines intact", async () => {
+  const { latestUserInput } = await import("../integrations/sillytavern/shared.js");
+  const calls = [], statuses = [];
+  const chat = [{ is_user: false, mes: "<gametxt>上一轮</gametxt>" }], variables = { 我的行动: "我推开门" };
+  const wrapped = createFetchInterceptor(async (...args) => { calls.push(args); return new Response("OK"); }, {
+    origin: "http://localhost", getMode: () => "off", getUnicodeInput: () => true,
+    getUserFloor: () => latestUserInput(chat, variables), onStatus: s => statuses.push(s) });
+  const messages = [{ role: "system", content: "<new_user>\n我推开门\n</new_user>" },
+    { role: "user", content: "[我的行动]我推开门\n" }, { role: "system", content: "<tag 我推开门>" }];
+  await wrapped(GENERATE_PATH, { method: "POST", body: JSON.stringify({ ...body, messages }) });
+  const sent = JSON.parse(calls.at(-1)[1].body).messages.map(message => message.content);
+  const encoded = "⟦U:6211 63A8 5F00 95E8⟧";
+  assert.deepEqual(sent, [`<new_user>\n${encoded}\n</new_user>`, `[我的行动]${encoded}\n`, "<tag 我推开门>"]);
+  assert.equal(statuses.at(-1).unicode.reason, "encoded");
+  assert.equal(statuses.at(-1).unicode.occurrences, 2);
+});
+
 test("image option forwards only eligible plugin requests and forces buffered image transport",async()=>{
  const calls=[],statuses=[];
  const intercept=createFetchInterceptor(async(...args)=>{calls.push(args);return new Response('OK');},{origin:'http://localhost',getMode:()=> 'streaming',getImageInput:()=> 'current-turn',onStatus:s=>statuses.push(s)});

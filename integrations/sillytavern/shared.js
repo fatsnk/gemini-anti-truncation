@@ -33,6 +33,17 @@ export function latestUserFloor(chat) {
   return "";
 }
 
+// Single-floor game cards post no user floor: their front end keeps this turn's
+// input in the chat variable 我的行动 and the preset reads it back with getvar.
+export const ACTION_VARIABLE = "我的行动";
+
+export function latestUserInput(chat, variables) {
+  const floor = latestUserFloor(chat);
+  if (floor) return floor;
+  const action = variables?.[ACTION_VARIABLE];
+  return typeof action === "string" ? action : "";
+}
+
 export const usesTools = body => Boolean(body.tools?.length || body.tool_choice != null ||
   (Array.isArray(body.messages) && body.messages.some(message => message?.role === "tool" || message?.tool_calls?.length || message?.tool_call_id ||
     (Array.isArray(message?.content) && message.content.some(part => part?.type === "tool_calls" || part?.type === "tool_call_id")))));

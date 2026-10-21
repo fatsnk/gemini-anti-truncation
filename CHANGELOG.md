@@ -2,6 +2,14 @@
 
 [中文](CHANGELOG.zh-CN.md) | English
 
+## Unreleased — Unicode input for single-floor game cards
+
+Not released yet; the UI extension still reports 0.6.1. Only the UI extension changes (TauriTavern runs the same extension); the server plugin, the standalone gateway and the gateway's floor bridge script are unchanged.
+
+- SillyTavern UI extension, Unicode input: when the chat has no real user floor (or the latest one is empty), the text of the chat variable 我的行动 is matched and encoded instead. Single-floor game cards such as 诡秘之主：第五纪 keep the whole game in message 0 and pass the player's input through their injections and the preset's `{{getvar::我的行动}}`; until now every generation stopped with "no real user floor". Chats that have a user floor still use only that floor's text.
+- The panel's option label, status lines and stop message now speak of "user input".
+- Validation: new offline tests cover the order of the two sources and a simulated single-floor request in which both copies of the input (the `<new_user>` block and the "[我的行动]" injection) are encoded while tag lines stay unchanged.
+
 ## SillyTavern integration 0.6.1 — shorter long-decode description
 
 Tag `sillytavern-v0.6.1` (one-step package). The standalone gateway and its Docker image stay at 0.11.0.

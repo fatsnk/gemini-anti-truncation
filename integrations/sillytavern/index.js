@@ -1,4 +1,4 @@
-import { PLUGIN_ID, PLUGIN_PATH, PLUGIN_VERSION, MIN_SERVER_VERSION, MODES, compareVersions, createFetchInterceptor, latestUserFloor } from "./shared.js";
+import { PLUGIN_ID, PLUGIN_PATH, PLUGIN_VERSION, MIN_SERVER_VERSION, MODES, compareVersions, createFetchInterceptor, latestUserInput } from "./shared.js";
 
 // TauriTavern has no Node server to host the plugin, so the extension shapes the
 // request and restores the reply itself. Rendering text as images needs the server.
@@ -12,7 +12,7 @@ const reasons = { "existing-tools": "旧版 functions 工具", "tool-choice": "�
   "structured-output": "结构化输出", "multiple-candidates": "多个候选回复",
   "tool-history": "旧版 function 工具历史", "web-search": "联网搜索", "image-generation": "图片生成", "reverse-proxy": "反向代理",
   model: "此模型不适用", "too-large": "请求超过 8 MiB", "additional-parameters": "Vertex 附加参数不是 JSON 对象，无法合并" };
-const errors = { unicode_floor_required: "找不到真实用户楼层，已停止发送。请先输入消息，或关闭 Unicode 转码。",
+const errors = { unicode_floor_required: "找不到真实用户楼层，也没有聊天变量“我的行动”，已停止发送。请先输入消息，或关闭 Unicode 转码。",
   unicode_input_too_large: "转码后的请求超过大小限制，已停止发送。请缩短输入或关闭 Unicode 转码。",
   plugin_not_ready: "服务端插件未就绪或版本太旧，本次请求已停止发送。点“检查插件连接”查看原因和更新办法。",
   image_input_requires_supported_request: "图片输入不支持此请求，已停止发送，未改用明文。请去掉不支持的内容或换用支持的模型，或关闭图片输入。",
@@ -43,7 +43,7 @@ function updateStatus(result) {
     const cause = result.bypass ? `原因：${reasons[result.bypass] ?? result.bypass}。` : "";
     return showStatus((errors[result.error] || `请求失败（${code}）。请查看酒馆错误提示；未自动重试。`) + cause);
   }
-  const unicode = result.unicode ? { encoded: "已对当前用户楼层的匹配文本转码。", "floor-not-found": "未匹配到用户楼层原文，按原文发送。", "no-encodable-text": "当前楼层没有需要转码的字符。" }[result.unicode.reason] || "" : "";
+  const unicode = result.unicode ? { encoded: "已对当前用户输入的匹配文本转码。", "floor-not-found": "请求中没有找到当前用户输入的原文，按原文发送。", "no-encodable-text": "当前用户输入没有需要转码的字符。" }[result.unicode.reason] || "" : "";
   const noText = result.image?.mode === "current-turn"
     ? "图片·当前轮：最后一条 AI 消息之后没有可转换的文本（如点击“继续”或以 AI 消息结尾的预填充），本次按原文发送。"
     : "图片·全部会话：没有可转换的文本，本次按原文发送。";
@@ -116,7 +116,7 @@ function mount() {
   input.className = "text_pole";
   for (const [value, text] of [
     ["off", "关闭（保持原文）"],
-    ["unicode", "Unicode（最新用户楼层及其副本）"],
+    ["unicode", "Unicode（最新用户楼层或“我的行动”变量，及其副本）"],
     ["current-turn", "图片·当前轮（本轮用户文本）"],
     ["all", "图片·全部会话（用户与 AI 文本）"],
   ]) if (!direct || !["current-turn", "all"].includes(value)) input.add(new Option(text, value));
@@ -158,7 +158,10 @@ function mount() {
       getImageInput: () => direct ? "off" : settings().imageInput || "off",
       getUnicodeInput: () => settings().unicodeInput === true,
       getLongDecode: () => !direct && settings().longDecode === true,
-      getUserFloor: () => latestUserFloor(SillyTavern.getContext().chat),
+      getUserFloor: () => {
+        const context = SillyTavern.getContext();
+        return latestUserInput(context.chat, context.chatMetadata?.variables);
+      },
       // Image input, Continue and client tools require a matching server plugin.
       ensureBackend: async feature => Boolean(direct) ||
         Boolean((backendReady || await checkBackend(true)) && (!feature || backendFeatures.includes(feature))), onStatus: updateStatus, direct });
