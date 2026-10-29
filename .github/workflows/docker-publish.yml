@@ -1,9 +1,7 @@
 name: Publish Docker image
 
 on:
-  push:
-    tags:
-      - gateway-v*
+  workflow_dispatch:
 
 permissions:
   contents: read
