@@ -40,7 +40,8 @@ export function prepareSillyTavernRequest(request, adapters) {
   // stays readable and the existing message remains unchanged in its context.
   const continuation = body.type === "continue";
   const clientTools = Boolean(body.tools?.length);
-  const prepared = prepareAntiTruncation({ messages, tools: body.tools, tool_choice: body.tool_choice }, mode !== "off", false, { continuation });
+  const contextInTool = body.vertex_context_in_tool === true;
+  const prepared = prepareAntiTruncation({ messages, tools: body.tools, tool_choice: body.tool_choice }, mode !== "off", false, { continuation, contextInTool });
   if (continuation && !prepared.toolName) {
     prepared.payload = { ...prepared.payload, messages: [...messages, { role: "user", content: CONTINUATION_INSTRUCTION }] };
   }

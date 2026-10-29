@@ -26,7 +26,7 @@ const updateServer = "用安装包装的，下载新版安装包再运行一次�
 let status, select, backendReady, backendFeatures = [], backendWarning;
 function settings() {
   const store = SillyTavern.getContext().extensionSettings;
-  store[PLUGIN_ID] ??= { mode: "off", unicodeInput: false };
+  store[PLUGIN_ID] ??= { mode: "off", unicodeInput: false, contextInTool: false };
   return store[PLUGIN_ID];
 }
 function mode() { return MODES.includes(settings().mode) ? settings().mode : "off"; }
@@ -130,7 +130,17 @@ function mount() {
     context.saveSettingsDebounced();
     showStatus();
   });
-  panel.append(label, select, inputLabel, input);
+  const contextInTool = document.createElement("label");
+  contextInTool.className = "checkbox_label";
+  contextInTool.htmlFor = "vertex_context_in_tool";
+  const contextInToolBox = Object.assign(document.createElement("input"), { type: "checkbox", id: contextInTool.htmlFor, checked: saved.contextInTool === true });
+  contextInToolBox.addEventListener("change", () => {
+    settings().contextInTool = contextInToolBox.checked;
+    context.saveSettingsDebounced();
+    showStatus();
+  });
+  contextInTool.append(contextInToolBox, Object.assign(document.createElement("span"), { textContent: "将请求上下文消息放入工具介绍（ToolCall description）" }));
+  panel.append(label, select, inputLabel, input, contextInTool);
   // TauriTavern's own backend sends the request, so it cannot follow long-decode continuation tokens.
   if (!direct) {
     const longDecode = document.createElement("label");
@@ -158,6 +168,7 @@ function mount() {
       getImageInput: () => direct ? "off" : settings().imageInput || "off",
       getUnicodeInput: () => settings().unicodeInput === true,
       getLongDecode: () => !direct && settings().longDecode === true,
+      getContextInTool: () => settings().contextInTool === true,
       getUserFloor: () => {
         const context = SillyTavern.getContext();
         return latestUserInput(context.chat, context.chatMetadata?.variables);

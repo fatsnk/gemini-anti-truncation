@@ -24,11 +24,123 @@ export function antiTruncationLogFields(metadata) {
 // description; otherwise no two requests share a prefix for Vertex implicit caching.
 const TOOL_NAME = "router_emit";
 
+function extractMessageText(message) {
+    if (!message || typeof message !== "object") return "";
+    if (typeof message.content === "string") return message.content;
+    if (Array.isArray(message.content)) {
+        return message.content
+            .filter(part => typeof part === "string" || (isObject(part) && (part.type === "text" || typeof part.text === "string")))
+            .map(part => typeof part === "string" ? part : (part.text || ""))
+            .join("\n");
+    }
+    return "";
+}
+
+function extractMessageAttachments(message) {
+    if (!message || typeof message !== "object" || !Array.isArray(message.content)) return [];
+    const attachments = [];
+    for (const part of message.content) {
+        if (isObject(part) && ((typeof part.type === "string" && part.type !== "text") || part.image_url || part.inline_data || part.file_data || part.input_audio)) {
+            attachments.push(structuredClone(part));
+        }
+    }
+    return attachments;
+}
+
+function isPureUserPlaceholder(message) {
+    if (!message || message.role !== "user") return false;
+    if (extractMessageAttachments(message).length > 0) return false;
+    return /^\s*user:\s*$/i.test(extractMessageText(message).trim());
+}
+
+// Moves request context messages into the synthetic tool's description and replaces
+// the outer messages list with a compact trigger turn (retaining any multimodal parts).
+export function packContextIntoTool(messages, toolName, transportPrompt) {
+    const filtered = messages.filter(msg => !isPureUserPlaceholder(msg));
+    const effective = filtered.length > 0 ? filtered : messages;
+    let customToolDesc = "";
+    let customFieldDesc = "";
+    const guideMessages = [];
+    const contextLines = [];
+    const attachments = [];
+
+    for (const msg of effective) {
+        if (!msg || typeof msg !== "object") continue;
+        const role = msg.role || "user";
+        attachments.push(...extractMessageAttachments(msg));
+        const rawText = extractMessageText(msg).replace(/%TOOL_NAME%/g, toolName);
+        if (rawText.includes("【ToolCall引导】")) {
+            const toolDescMatch = rawText.match(/【ToolCall引导】(?:工具说明|工具描述)[\s\S]*?(?=(?:【ToolCall引导】|$))/i);
+            if (toolDescMatch) {
+                customToolDesc = toolDescMatch[0].replace(/【ToolCall引导】(?:工具说明|工具描述)\s*/i, "").trim();
+            }
+            const fieldDescMatch = rawText.match(/【ToolCall引导】(?:字段说明|正文说明|参数说明)[\s\S]*?(?=(?:【ToolCall引导】|$))/i);
+            if (fieldDescMatch) {
+                customFieldDesc = fieldDescMatch[0].replace(/【ToolCall引导】(?:字段说明|正文说明|参数说明)\s*/i, "").trim();
+            }
+            const blocks = rawText.match(/【ToolCall引导】[\s\S]*?(?=(?:【ToolCall引导】|$))/gi) || [];
+            for (const block of blocks) {
+                if (/【ToolCall引导】(?:工具说明|工具描述|字段说明|正文说明|参数说明)/i.test(block)) continue;
+                const cleaned = block.replace(/【ToolCall引导】\s*/g, "").trim();
+                if (!cleaned) continue;
+                let blockRole = role === "developer" ? "system" : role;
+                if (/^\[SYSTEM_/i.test(cleaned)) blockRole = "system";
+                else if (/^\[RuntimeRouter\]|^\[Runtime Router\]|^\[ActionDirective\]|^\[Action Directive\]|^\[User/i.test(cleaned)) blockRole = "user";
+                else if (/^\[ExecutionKernel\]|^\[Execution Kernel\]|^\[Assistant/i.test(cleaned)) blockRole = "assistant";
+                guideMessages.push({ role: blockRole, content: cleaned });
+            }
+            const remaining = rawText.replace(/【ToolCall引导】[\s\S]*?(?=(?:【ToolCall引导】|$))/gi, "").trim();
+            if (remaining) contextLines.push(remaining);
+            continue;
+        }
+        const trimmed = rawText.trim();
+        if (trimmed) contextLines.push(`[${role.toUpperCase()}]\n${trimmed}`);
+    }
+
+    const baseToolDesc = customToolDesc || "Deliver the user-visible reply as text.";
+    const combinedContext = contextLines.join("\n\n---\n\n");
+    const toolDescription = combinedContext
+        ? `${baseToolDesc}\n\n<workspace_context>\n${combinedContext}\n</workspace_context>`
+        : baseToolDesc;
+
+    const nextMessages = guideMessages.length > 0
+        ? guideMessages.map(m => ({ ...m }))
+        : [{ role: "user", content: transportPrompt }];
+    while (nextMessages.length > 0 && nextMessages.at(-1)?.role === "assistant") {
+        nextMessages.pop();
+    }
+    if (nextMessages.length === 0 || nextMessages.at(-1)?.role !== "user") {
+        nextMessages.push({ role: "user", content: transportPrompt });
+    } else if (guideMessages.length > 0 && !nextMessages.at(-1).content.includes(toolName)) {
+        nextMessages[nextMessages.length - 1] = {
+            ...nextMessages.at(-1),
+            content: `${nextMessages.at(-1).content}\n\n${transportPrompt}`,
+        };
+    }
+
+    if (attachments.length > 0) {
+        const targetIndex = nextMessages.findIndex(m => m.role === "user");
+        const idx = targetIndex >= 0 ? targetIndex : nextMessages.length - 1;
+        const target = nextMessages[idx];
+        const textContent = extractMessageText(target);
+        nextMessages[idx] = {
+            ...target,
+            content: [...(textContent ? [{ type: "text", text: textContent }] : []), ...attachments],
+        };
+    }
+
+    return {
+        messages: nextMessages,
+        toolDescription,
+        fieldDescription: customFieldDesc || undefined,
+    };
+}
+
 // Opt-in transport for text replies. Client tools and tool history stay usable next to
 // the synthetic tool. A forced tool choice (no text reply expected, e.g.
 // Tavern Helper's own transport), the legacy functions API, structured output and
 // multi-candidate requests bypass it.
-export function prepareAntiTruncation(payload, enabled, streamArguments = false, { continuation = false, native = true } = {}) {
+export function prepareAntiTruncation(payload, enabled, streamArguments = false, { continuation = false, native = true, contextInTool = false } = {}) {
     const skip = reason => ({ payload, toolName: null, reason });
     if (!enabled) return skip("disabled");
     if (payload.functions?.length) return skip("existing-tools");
@@ -53,23 +165,27 @@ export function prepareAntiTruncation(payload, enabled, streamArguments = false,
     // goes through the synthetic one, real calls pass through. "none" keeps them uncallable.
     const callable = clientTools.length > 0 && payload.tool_choice !== "none";
     const text = continuation ? "only the new continuation text" : "the entire user-visible answer";
+    const transportPrompt = (callable
+        ? `Transport format for this reply: put all user-visible text, if any, in exactly one call of ${toolName}; its content string holds ${text}, preserving all requested formatting, markup, language and sections. ${toolName} only transports text and performs no external action. Call the other tools whenever the task needs them, with or without ${toolName}.`
+        : `Transport format for this reply: call ${toolName} exactly once. Put ${text} in its content string, preserving all requested formatting, markup, language and sections. The function only transports text and performs no external action.`)
+        + (continuation ? "\n" + CONTINUATION_INSTRUCTION : "");
+    const hasToolHistory = payload.messages.some(m => m?.role === "tool" || m?.tool_calls?.length || m?.tool_call_id);
+    const packed = contextInTool && !hasToolHistory ? packContextIntoTool(payload.messages, toolName, transportPrompt) : null;
+    const contentProp = packed?.fieldDescription ? { type: "string", description: packed.fieldDescription } : { type: "string" };
     return {
         toolName,
         nativeStreaming,
         reason: nativeStreaming ? "tool-transport-native-streaming" : requested ? "tool-transport-buffered-fields" : "tool-transport",
         payload: {
             ...payload,
-            messages: [...payload.messages, {
+            messages: packed ? packed.messages : [...payload.messages, {
                 role: "user",
-                content: (callable
-                    ? `Transport format for this reply: put all user-visible text, if any, in exactly one call of ${toolName}; its content string holds ${text}, preserving all requested formatting, markup, language and sections. ${toolName} only transports text and performs no external action. Call the other tools whenever the task needs them, with or without ${toolName}.`
-                    : `Transport format for this reply: call ${toolName} exactly once. Put ${text} in its content string, preserving all requested formatting, markup, language and sections. The function only transports text and performs no external action.`)
-                    + (continuation ? "\n" + CONTINUATION_INSTRUCTION : ""),
+                content: transportPrompt,
             }],
             tools: [...clientTools, { type: "function", function: {
                 name: toolName,
-                description: "Deliver the user-visible reply as text.",
-                parameters: { type: "object", properties: { content: { type: "string" } }, required: ["content"], additionalProperties: false },
+                description: packed ? packed.toolDescription : "Deliver the user-visible reply as text.",
+                parameters: { type: "object", properties: { content: contentProp }, required: ["content"], additionalProperties: false },
             } }],
             tool_choice: callable ? "required" : { type: "function", function: { name: toolName } },
             ...(callable ? {} : { parallel_tool_calls: false }),

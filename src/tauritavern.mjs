@@ -37,12 +37,15 @@ export function prepareTauriTavernRequest(body, mode) {
   body = payload;
   const continuation = body.type === "continue";
   const upstreamStream = mode === "streaming" && body.stream === true;
-  const prepared = prepareAntiTruncation({ messages: body.messages }, true, false, { continuation });
+  const contextInTool = body.vertex_context_in_tool === true;
+  const prepared = prepareAntiTruncation({ messages: body.messages }, true, false, { continuation, contextInTool });
   const native = nativeRequestBody({ ...prepared.payload, messages: [] });
   if (upstreamStream) native.toolConfig.functionCallingConfig.streamFunctionCallArguments = true;
+  const nextBody = { ...body, messages: prepared.payload.messages, stream: true,
+    custom_include_body: JSON.stringify({ ...included, tools: native.tools, toolConfig: native.toolConfig }) };
+  delete nextBody.vertex_context_in_tool;
   return {
-    body: { ...body, messages: prepared.payload.messages, stream: true,
-      custom_include_body: JSON.stringify({ ...included, tools: native.tools, toolConfig: native.toolConfig }) },
+    body: nextBody,
     toolName: prepared.toolName, model: body.model, stream: body.stream === true, upstreamStream, continuation, outputLimit,
   };
 }

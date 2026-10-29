@@ -220,7 +220,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       droppedParams = Object.keys(payload).filter(key => unsupported.has(key));
       payload = dropParams(payload, unsupported);
       if (droppedParams.length) response.setHeader("x-gemini-dropped-params", droppedParams.join(","));
-      const transport = prepareAntiTruncation(payload, route.mode !== "normal" && config.antiTruncation !== false, route.mode === "streaming", { native: !custom });
+      const transport = prepareAntiTruncation(payload, route.mode !== "normal" && config.antiTruncation !== false, route.mode === "streaming", { native: !custom, contextInTool: config.contextInTool === true });
       const buffered = route.mode === "buffered" && Boolean(transport.toolName);
       const upstreamStream = stream && !buffered;
       if (buffered) transport.reason = "tool-transport-buffered";

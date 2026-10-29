@@ -77,7 +77,7 @@ export function bypassReason(body, mode) {
 
 // ST 1.19 exposes a settings event, but not a generation-URL override. Intercept
 // only its same-origin Vertex POST; preserve the original fetch for everything else.
-export function createFetchInterceptor(originalFetch, { origin, getMode, getUnicodeInput = () => false, getImageInput = () => "off", getLongDecode = () => false, getUserFloor = () => "", ensureBackend = async () => true, onStatus = () => {}, direct }) {
+export function createFetchInterceptor(originalFetch, { origin, getMode, getUnicodeInput = () => false, getImageInput = () => "off", getLongDecode = () => false, getContextInTool = () => false, getUserFloor = () => "", ensureBackend = async () => true, onStatus = () => {}, direct }) {
   return async function vertexFetch(input, init) {
     let url;
     try { url = new URL(typeof input === "string" || input instanceof URL ? input : input.url, origin); }
@@ -112,14 +112,15 @@ export function createFetchInterceptor(originalFetch, { origin, getMode, getUnic
     }
     // Without a server plugin (TauriTavern), `direct` adds the transport to ST's
     // own request here and restores the reply below.
+    const contextInTool = getContextInTool() === true && mode !== "off";
     let prepared;
     if (direct && !reason) {
-      try { prepared = direct.prepare(body, mode); }
+      try { prepared = direct.prepare(contextInTool ? { ...body, vertex_context_in_tool: true } : body, mode); }
       catch (error) { onStatus({ error: error.code || "invalid_request" }); throw error; }
       reason = prepared.bypass ?? null;
     }
     let payload = reason ? null : JSON.stringify(prepared?.body ??
-      { ...body, vertex_anti_truncation: mode, ...(getLongDecode() === true ? { vertex_long_decode: true } : {}) });
+      { ...body, vertex_anti_truncation: mode, ...(getLongDecode() === true ? { vertex_long_decode: true } : {}), ...(contextInTool ? { vertex_context_in_tool: true } : {}) });
     // The plugin rejects bodies over its limit; keep ST's own route for plain
     // anti-truncation. Image input never falls back to plaintext.
     if (payload && !imageEnabled && new TextEncoder().encode(payload).length > BODY_LIMIT) reason = "too-large";
