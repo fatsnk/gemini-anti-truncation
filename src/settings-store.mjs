@@ -11,24 +11,68 @@ export class SettingsError extends Error {
 const revisionOf = text => createHash("sha256").update(text).digest("hex");
 const settingNames = new Set(Object.keys(DEFAULT_SETTINGS));
 
-export function mergeSettings(current, patch, { connectionOnly = false } = {}) {
+export function mergeSettings(current, patch, { connectionOnly = false, channel = null, upstreamIds = null } = {}) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch) || Object.keys(patch).some(k => !settingNames.has(k))) throw new SettingsError("Invalid configuration fields");
   const next = { ...current };
+  const currentUpstreams = Array.isArray(current.customUpstreams) && current.customUpstreams.length
+    ? current.customUpstreams
+    : (current.customBaseUrl || current.customApiKey ? [{ baseUrl: current.customBaseUrl || "", apiKey: current.customApiKey || "" }] : []);
   for (const [key, value] of Object.entries(patch)) {
-    if (SECRET_FIELDS.includes(key)) {
+    if (key === "customUpstreams") {
+      if (value === null) {
+        next.customUpstreams = null;
+        next.customBaseUrl = "";
+        next.customApiKey = "";
+        continue;
+      }
+      if (!Array.isArray(value) || value.length > 32) throw new SettingsError("Invalid custom upstream configuration");
+      next.customUpstreams = value.map((item, idx) => {
+        if (!item || typeof item !== "object" || Array.isArray(item) || Object.keys(item).some(k => !["baseUrl", "apiKey", "savedIndex"].includes(k))) {
+          throw new SettingsError("Invalid custom upstream configuration");
+        }
+        const baseUrl = typeof item.baseUrl === "string" ? item.baseUrl.trim() : "";
+        const sourceIndex = item.savedIndex !== undefined
+          ? (Number.isInteger(item.savedIndex) && item.savedIndex >= 0 && item.savedIndex < currentUpstreams.length ? item.savedIndex : -1)
+          : idx;
+        let apiKey = sourceIndex >= 0 ? (currentUpstreams[sourceIndex]?.apiKey || "") : "";
+        if (item.apiKey === null) {
+          apiKey = "";
+        } else if (item.apiKey !== undefined) {
+          if (typeof item.apiKey !== "string" || item.apiKey.length > 128 * 1024) throw new SettingsError("Invalid credential field");
+          if (item.apiKey.trim()) apiKey = item.apiKey.trim().replace(/^\uFEFF/, "");
+        }
+        return { baseUrl, apiKey };
+      });
+      next.customBaseUrl = next.customUpstreams[0]?.baseUrl || "";
+      next.customApiKey = next.customUpstreams[0]?.apiKey || "";
+    } else if (SECRET_FIELDS.includes(key)) {
       // Blank keeps the stored secret; null removes it.
       if (value === null) { next[key] = ""; continue; }
       if (typeof value !== "string" || value.length > 128 * 1024) throw new SettingsError("Invalid credential field");
       if (value.trim()) next[key] = value.trim().replace(/^\uFEFF/, "");
     } else next[key] = value;
   }
+  if (patch.customUpstreams === undefined && (patch.customBaseUrl !== undefined || patch.customApiKey !== undefined)) {
+    if (patch.customApiKey === null) {
+      next.customUpstreams = null;
+    } else if (Array.isArray(next.customUpstreams) && next.customUpstreams.length <= 1) {
+      next.customUpstreams = next.customBaseUrl || next.customApiKey ? [{ baseUrl: next.customBaseUrl, apiKey: next.customApiKey }] : null;
+    }
+  }
   if (next.authMode === "service-account" && !next.projectId && next.serviceAccountJson) {
     try { next.projectId = JSON.parse(next.serviceAccountJson).project_id || ""; } catch { /* Validated below. */ }
   }
-  if (connectionOnly) buildConnectionConfig(next);
+  if (connectionOnly) buildConnectionConfig(next, { channel });
   else {
-    if (next.models != null) next.models = modelProfiles(next.models, true, { custom: next.authMode === "custom" });
-    buildConfig(next);
+    const conn = buildConnectionConfig(next);
+    if (next.models != null) {
+      next.models = modelProfiles(next.models, true, {
+        custom: next.authMode === "custom",
+        channelCount: next.authMode === "custom" ? conn.customUpstreams.length : null,
+        upstreamIds,
+      });
+    }
+    buildConfig(next, { upstreamIds });
   }
   return next;
 }

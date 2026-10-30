@@ -10,7 +10,7 @@ import { buildNativeTextBody, buildNativeUrl, nativeRequestBody, supportsNativeR
 import { estimateCostUsd, usageTokens } from "./pricing.mjs";
 import { wrapNativeTextStream } from "./vertex-text-stream.mjs";
 import { translateNativeCompletion, wrapNativeStream } from "./vertex-protocol.mjs";
-import { geminiModelKey, modelProfiles } from "./model-profiles.mjs";
+import { geminiModelKey, modelProfiles, parseCustomModelId } from "./model-profiles.mjs";
 import { completionStream, aliasStream } from "./completion-stream.mjs";
 import { convertGeminiPrefill, fetchWithGeminiRecovery, compatibilityLogFields } from "./gemini-compat.mjs";
 import { capGemini4Output, outputLimitHeaders, prepareGemini4Request, validateGemini4Connection } from "./gemini4.mjs";
@@ -138,9 +138,18 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
   // Temporary errors (including 403/404/429) never remove models from the list.
   const rejectedCredentials = new WeakSet();
   const currentConfig = () => typeof configSource === "function" ? configSource() : configSource;
-  const profiles = config => config.models || modelProfiles(null, config.antiTruncation !== false);
+  const customUpstreamFor = (config, modelId) => {
+    if (config.authMode !== "custom") return null;
+    const parsed = parseCustomModelId(modelId);
+    if (!parsed) return null;
+    const list = config.customUpstreams;
+    if (Array.isArray(list) && list.length) return list[parsed.channel - 1] || null;
+    return parsed.channel === 1 ? { channel: 1, baseUrl: config.baseUrl, accessToken: config.accessToken } : null;
+  };
+  const profiles = config => config.models || modelProfiles(null, config.antiTruncation !== false, { custom: config.authMode === "custom" });
   const availability = config => profiles(config).map(model => {
-    const reason = model.enabled === false ? "disabled" : rejectedCredentials.has(config) ? "authentication_failed" : null;
+    const target = config.authMode === "custom" ? customUpstreamFor(config, model.id) : config;
+    const reason = model.enabled === false ? "disabled" : (!target || rejectedCredentials.has(target)) ? "authentication_failed" : null;
     return { id: model.id, available: reason === null, reason, hidden: config.hideUnavailableModels !== false && reason !== null };
   });
   let active = 0;
@@ -180,8 +189,10 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       route = models.find(model => model.id === payload.model);
       if (!route) throw new Problem(400, "unsupported_model");
       if (route.enabled === false) throw new Problem(503, "model_disabled");
-      validateGemini4Connection(config, route.upstreamModel);
       const custom = config.authMode === "custom";
+      const targetUpstream = custom ? customUpstreamFor(config, route.id) : config;
+      if (custom && !targetUpstream) throw new Problem(400, "unsupported_model");
+      validateGemini4Connection(config, route.upstreamModel);
       // A custom upstream gets its own model name verbatim. Gemini-specific handling follows the
       // model that name refers to, and is skipped when none is recognizable.
       const modelKey = custom ? geminiModelKey(route.upstreamModel) : route.upstreamModel;
@@ -242,7 +253,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       response.setHeader("x-anti-truncation-transport", transport.reason);
       let url = native
         ? buildNativeUrl(config.baseUrl, route.upstreamModel, upstreamStream)
-        : config.baseUrl + "/chat/completions";
+        : (targetUpstream?.baseUrl || config.baseUrl) + "/chat/completions";
       if (longDecode) url = longDecodeUrl(url);
       const expectation = native ? structuredOutputExpectation(payload) : null;
       const requestBody = value => {
@@ -258,7 +269,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       const firstBody = requestBody(upstreamPayload);
       // A failed token exchange (or its timeout, or an unusable service account) is a local
       // credential problem; cancellation still reports 499/504 below.
-      credential = await waitWithSignal(() => config.accessToken(), signal)
+      credential = await waitWithSignal(() => (targetUpstream?.accessToken || config.accessToken)(), signal)
         .catch(() => { throw new Problem(502, "credential_error"); });
       const dispatcher = await waitWithSignal(() => upstreamDispatcher(config.timeoutMs), signal);
       signal.throwIfAborted();
@@ -284,7 +295,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       });
       response.setHeader("x-gemini-prompt-retried", String(compatibility.promptRetried));
       if (!upstream.ok) {
-        if (upstream.status === 401) rejectedCredentials.add(config);
+        if (upstream.status === 401) rejectedCredentials.add(targetUpstream || config);
         const retryAfter = upstream.headers.get("retry-after");
         if (retryAfter && /^\d{1,6}$/.test(retryAfter)) response.setHeader("retry-after", retryAfter);
         // A matched prompt rejection keeps only its code; other errors add Google's fixed fields.
@@ -342,7 +353,7 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
         }
         send(response, status, completion);
       }
-      rejectedCredentials.delete(config);
+      rejectedCredentials.delete(targetUpstream || config);
     } catch (error) {
       // An unfinished upload must not hold a keep-alive connection open after
       // its deadline/body limit; close only after the error response is sent.

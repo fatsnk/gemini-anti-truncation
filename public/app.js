@@ -10,9 +10,25 @@ const transportNames = { "tool-transport-native-streaming": "原生参数流", "
 const consoleDown = "无法连接本地控制台，请确认控制台进程仍在运行。";
 const replyInterrupted = "回复中途中断（网关已断开连接），请按请求 ID 在请求日志查看错误码。";
 const state = { csrf: null, config: null, status: null, events: [], dirty: false, page: "overview", probe: null, timer: null,
-  models: [], catalog: null, selected: new Set(), forcedGlobal: false, userLocation: "global", pendingDraft: null, refreshError: null, rendered: {} };
+  models: [], catalog: null, selected: new Set(), forcedGlobal: false, userLocation: "global", pendingDraft: null, refreshError: null, rendered: {},
+  customUpstreams: [], upstreamIdsByChannel: {} };
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const upstreamHost = url => { try { return new URL(url).host; } catch { return url; } };
+const formatCustomHosts = (upstreams, fallbackUrl) => {
+  const list = Array.isArray(upstreams) && upstreams.length ? upstreams : (fallbackUrl ? [{ baseUrl: fallbackUrl }] : []);
+  const parts = list.map((u, i) => u?.baseUrl ? `[${i + 1}] ${upstreamHost(u.baseUrl)}` : null).filter(Boolean);
+  return parts.join(" · ") || "—";
+};
+const parseCustomChannel = id => {
+  const m = /^([\p{L}\p{N}][\p{L}\p{N}._@-]{0,149})\[([1-9]\d{0,2})\]$/u.exec(String(id ?? "").trim());
+  return m ? { baseId: m[1], channel: Number(m[2]) } : null;
+};
+const allKnownUpstreamIds = () => {
+  const ids = new Set(state.models.map(m => m.upstreamModel.trim()).filter(Boolean));
+  for (const list of Object.values(state.upstreamIdsByChannel)) for (const id of list || []) ids.add(id);
+  if (state.catalog) for (const m of state.catalog) if (m.id) ids.add(m.id);
+  return [...ids];
+};
 let toastTimer;
 function toast(message) { $("toast").textContent = message; $("toast").hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $("toast").hidden = true; }, 4000); }
 function errorMessage(message) {
@@ -48,7 +64,12 @@ function errorMessage(message) {
     "unsupported_native_fields": "此请求含原生接口无法保留的字段，请改用标准服务账号模式或移除不支持的字段。",
     "Invalid upstream Gemini model ID": "请输入有效的 Gemini 上游模型 ID，例如 gemini-3.7-flash。从自定义上游切回 Vertex 时，不符合这种写法的上游模型名需要先改掉。",
     "Invalid custom upstream model name": "上游模型名不能为空，不能含换行等控制字符，最长 200 个字符。",
-    "Invalid public model ID": "客户端模型名称限 160 字符，可用中文、字母、数字、点、短横线、下划线及 @；不能包含空格。",
+    "Invalid public model ID": "客户端模型名称限 160 字符，可用中文、字母、数字、点、短横线、下划线及 @；不能包含空格。从自定义上游切回 Vertex 时，请先去掉模型名称末尾的 [渠道编号] 后缀。",
+    "Custom upstream model ID must end with a channel suffix like [1]": "自定义上游模式下，客户端模型名称必须以 [渠道编号] 结尾（例如 gemini-3.7-flash-antitruncation[1]），无渠道后缀视为不合法名称；前缀限 150 字符，可用中文、字母、数字、点、短横线、下划线及 @。",
+    "Model channel suffix exceeds configured custom upstreams": "客户端模型名称末尾的 [渠道编号] 超出了当前已配置的自定义上游渠道数量，请检查编号或添加对应渠道。",
+    "Client model ID conflicts with an upstream model ID; please change the model alias": "客户端模型名称与上游已有的模型 ID 重名，请更换模型别名。",
+    "Invalid custom upstream channel": "所选自定义上游渠道编号无效。",
+    "Invalid custom upstream configuration": "自定义上游渠道配置无效（最多可添加 32 个渠道）。",
     "Model IDs must be unique": "客户端模型名称重复，请给每个版本使用不同名称。",
     "Model list must contain at most 100 entries": "最多可保存 100 个模型版本。",
     "Invalid model enabled setting": "模型的启用状态必须是开或关。",
@@ -173,14 +194,17 @@ function showLogin(expired) {
   if (!$("app-view").hidden) {
     // A lost session keeps the unapplied draft for the next sign-in, without credentials.
     if (expired && state.dirty) {
-      const { gatewayKey, serviceAccountJson, apiKey, accessToken, customApiKey, ...settings } = draft();
+      const { gatewayKey, serviceAccountJson, apiKey, accessToken, customApiKey, customUpstreams, ...settings } = draft();
+      if (Array.isArray(customUpstreams)) settings.customUpstreams = customUpstreams.map(u => ({ ...u, apiKey: "" }));
       state.pendingDraft = { settings, revision: state.config.revision, userLocation: state.userLocation };
     } else state.pendingDraft = null;
     state.dirty = Boolean(state.pendingDraft);
   }
   state.csrf = null; clearInterval(state.timer); state.probe?.abort();
   $("login-view").hidden = false; $("app-view").hidden = true;
-  for (const id of ["gateway-key", "service-account", "api-key", "access-token", "custom-api-key"]) $(id).value = "";
+  for (const id of ["gateway-key", "service-account", "api-key", "access-token"]) $(id).value = "";
+  for (const u of state.customUpstreams) u.apiKey = "";
+  document.querySelectorAll('#custom-upstream-rows input[type="password"]').forEach(el => { el.value = ""; });
   setError("login-error", expired ? "登录已过期，请重新登录。" + (state.pendingDraft ? "未应用的修改会在登录后恢复，凭据需重新输入。" : "") : "");
   $("login-key").focus();
   // Setup may have finished in this tab since load, so ask again which key the card should request.
@@ -195,17 +219,57 @@ const credentialFields = { "service-account": ["serviceAccountJson", "服务账�
 // environment, and that save already keeps only the selected mode's credential.
 const otherCredentials = authMode => state.config?.saved ? Object.entries(credentialFields)
   .filter(([mode, [name]]) => mode !== authMode && state.config.settings[name + "Set"]).map(([, field]) => field) : [];
+function renderDiscoverChannels() {
+  const custom = document.querySelector('[name="authMode"]:checked')?.value === "custom";
+  $("discover-channel-wrap").hidden = !custom;
+  if (!custom) return;
+  const select = $("discover-channel");
+  const previous = select.value;
+  const options = state.customUpstreams.map((u, i) => {
+    const ch = i + 1;
+    const host = u.baseUrl.trim() ? upstreamHost(u.baseUrl.trim()) : "未填写地址";
+    return `<option value="${ch}">[${ch}] 渠道 ${ch} · ${esc(host)}</option>`;
+  }).join("");
+  if (select.innerHTML !== options) {
+    select.innerHTML = options;
+    if (state.customUpstreams[Number(previous) - 1]) select.value = previous;
+  }
+}
+function renderCustomUpstreams() {
+  $("custom-upstream-rows").innerHTML = state.customUpstreams.map((u, i) => {
+    const ch = i + 1;
+    const placeholder = u.apiKeySet
+      ? (state.config?.saved ? "已保存 · 留空保留，输入则替换" : "已从环境变量导入 · 留空沿用，输入则替换")
+      : "输入上游 API Key";
+    return `<div class="custom-upstream-row" data-custom-row="${i}">
+      <span class="custom-channel-badge" title="渠道编号 ${ch}，客户端模型名称后缀为 [${ch}]">渠道 ${ch} · [${ch}]</span>
+      <label>上游地址（Base URL）<input data-custom-field="baseUrl" inputmode="url" value="${esc(u.baseUrl)}" placeholder="https://relay.example.com/v1" spellcheck="false" maxlength="2048" aria-label="渠道 ${ch} 上游地址"></label>
+      <label>上游 API Key<input data-custom-field="apiKey" type="password" value="${esc(u.apiKey)}" placeholder="${esc(placeholder)}" autocomplete="new-password" aria-label="渠道 ${ch} 上游 API Key"></label>
+      <button class="btn ghost remove-custom" type="button" data-remove-custom="${i}"${state.customUpstreams.length <= 1 ? " disabled" : ""} aria-label="移除渠道 ${ch}">移除</button>
+    </div>`;
+  }).join("");
+  $("add-custom-upstream").disabled = state.customUpstreams.length >= 32;
+  renderDiscoverChannels();
+}
 function draft() {
   const authMode = document.querySelector('[name="authMode"]:checked').value;
   const clear = $("clear-other").checked ? otherCredentials(authMode).map(([name]) => name) : [];
   // Text left in a hidden credential panel must not replace another mode's stored credential; null deletes it.
   const credential = (id, mode) => authMode === mode ? $(id).value.trim() : clear.includes(credentialFields[mode][0]) ? null : "";
+  const clearCustom = authMode !== "custom" && clear.includes("customApiKey");
+  const savedUpstreams = state.config?.settings?.customUpstreams || [];
+  const customUpstreams = authMode === "custom"
+    ? state.customUpstreams.map(u => ({ baseUrl: u.baseUrl.trim(), apiKey: u.apiKey.trim(), savedIndex: u.savedIndex }))
+    : clearCustom ? null
+    : savedUpstreams.length ? savedUpstreams.map((u, idx) => ({ baseUrl: u.baseUrl, apiKey: "", savedIndex: idx })) : null;
   return { authMode,
     serviceTier: document.querySelector('[name="serviceTier"]:checked').value,
     projectId: $("project-id").value.trim(), location: $("location").value.trim(),
     gatewayKey: $("gateway-key").value.trim(), serviceAccountJson: credential("service-account", "service-account"),
     apiKey: credential("api-key", "express"), accessToken: credential("access-token", "access-token"),
-    customBaseUrl: $("custom-base-url").value.trim(), customApiKey: credential("custom-api-key", "custom"),
+    customUpstreams,
+    customBaseUrl: authMode === "custom" ? (state.customUpstreams[0]?.baseUrl.trim() || "") : clearCustom ? "" : (state.config?.settings?.customBaseUrl || ""),
+    customApiKey: authMode === "custom" ? (state.customUpstreams[0]?.apiKey.trim() || "") : clearCustom ? null : "",
     port: Number($("port").value), timeoutMs: Number($("timeout").value) * 1000, antiTruncation: true, models: state.models.map(m => ({ ...m })),
     unicodeInput: $("unicode-input").checked, imageInput: $("image-input").value, contextInTool: $("context-in-tool").checked, hideUnavailableModels: $("hide-unavailable").checked, geminiPrefillToUser: $("prefill-to-user").checked,
     geminiLongDecode: $("long-decode").checked, geminiPromptRetryEnabled: $("prompt-retry-enabled").checked, geminiPromptRetryText: $("prompt-retry-text").value,
@@ -258,7 +322,7 @@ function updateDraft(dirty = true) {
   $("clear-other-label").textContent = "保存时删除其他鉴权方式已保存的凭据：" + others.map(([, label]) => label).join("、");
   $("preview-auth").textContent = authNames[d.authMode]; $("preview-tier").textContent = custom ? "不适用" : tierNames[d.serviceTier];
   $("preview-location-label").textContent = custom ? "上游" : "地区";
-  $("preview-location").textContent = (custom ? upstreamHost(d.customBaseUrl) : d.authMode === "express" && !d.projectId ? "由 Express 决定" : $("location").value) || "—"; $("preview-port").textContent = d.port || "—";
+  $("preview-location").textContent = (custom ? formatCustomHosts(d.customUpstreams) : d.authMode === "express" && !d.projectId ? "由 Express 决定" : $("location").value) || "—"; $("preview-port").textContent = d.port || "—";
   $("tier-help").textContent = d.serviceTier === "standard" ? "使用标准档位，不自动升级服务等级。" : d.serviceTier === "flex"
     ? "Flex 使用原生接口，响应等待可能更长。账户和模型须支持该档位；失败时不会自动切换为 Standard。"
     : "Priority 使用优先按量服务，按对应档位计费。实际是否使用 Priority 请查看请求日志中的上游档位。";
@@ -269,6 +333,7 @@ function updateDraft(dirty = true) {
   $("models-count").textContent = state.models.length + " 个版本";
   $("discard-button").disabled = !state.dirty;
   $("models-discard").disabled = !state.dirty;
+  renderDiscoverChannels();
   updateRetryText();
   updateSelection();
 }
@@ -279,7 +344,18 @@ function fillConfig(c = state.config.settings) {
     const radios = [...document.querySelectorAll(`[name="${name}"]`)];
     (radios.find(el => el.value === c[name]) || radios[0]).checked = true;
   }
-  for (const [id, name] of [["project-id", "projectId"], ["location", "location"], ["port", "port"], ["custom-base-url", "customBaseUrl"]]) $(id).value = c[name];
+  for (const [id, name] of [["project-id", "projectId"], ["location", "location"], ["port", "port"]]) $(id).value = c[name];
+  const savedUpstreams = saved.customUpstreams || [];
+  const sourceUpstreams = Array.isArray(c.customUpstreams) && c.customUpstreams.length
+    ? c.customUpstreams
+    : (c.customBaseUrl || saved.customApiKeySet ? [{ baseUrl: c.customBaseUrl || "", apiKeySet: Boolean(saved.customApiKeySet), savedIndex: 0 }] : []);
+  state.customUpstreams = sourceUpstreams.length
+    ? sourceUpstreams.map((u, idx) => {
+        const sIdx = u.savedIndex !== undefined ? u.savedIndex : idx;
+        return { baseUrl: u.baseUrl || "", apiKey: "", apiKeySet: Boolean(u.apiKeySet ?? savedUpstreams[sIdx]?.apiKeySet), savedIndex: Number.isInteger(sIdx) && sIdx < savedUpstreams.length ? sIdx : null };
+      })
+    : [{ baseUrl: "", apiKey: "", apiKeySet: false, savedIndex: null }];
+  renderCustomUpstreams();
   $("timeout").value = c.timeoutMs / 1000;
   $("unicode-input").checked = c.unicodeInput === true;
   $("image-input").value = c.imageInput || "off";
@@ -291,8 +367,8 @@ function fillConfig(c = state.config.settings) {
   $("prompt-retry-text").value = c.geminiPromptRetryText || "";
   $("prompt-retry-matches").value = (c.geminiPromptRetryMatches || []).join("\n");
   state.models = c.models.map(m => ({ ...m })); renderModels();
-  for (const [id, name] of [["gateway-key", "gatewayKey"], ["service-account", "serviceAccountJson"], ["api-key", "apiKey"], ["access-token", "accessToken"], ["custom-api-key", "customApiKey"]]) {
-    $(id).value = ""; $(id).placeholder = saved[name + "Set"] ? (state.config.saved ? "已保存 · 留空保留，输入则替换" : "已从环境变量导入 · 留空沿用，输入则替换") : ({ gatewayKey: "至少 16 个可见 ASCII 字符，或生成随机密钥",serviceAccountJson: "粘贴完整的服务账号 JSON，或导入文件", apiKey: "输入 Vertex Express API Key", accessToken: "输入短期 Google OAuth 令牌", customApiKey: "输入上游 API Key" })[name];
+  for (const [id, name] of [["gateway-key", "gatewayKey"], ["service-account", "serviceAccountJson"], ["api-key", "apiKey"], ["access-token", "accessToken"]]) {
+    $(id).value = ""; $(id).placeholder = saved[name + "Set"] ? (state.config.saved ? "已保存 · 留空保留，输入则替换" : "已从环境变量导入 · 留空沿用，输入则替换") : ({ gatewayKey: "至少 16 个可见 ASCII 字符，或生成随机密钥",serviceAccountJson: "粘贴完整的服务账号 JSON，或导入文件", apiKey: "输入 Vertex Express API Key", accessToken: "输入短期 Google OAuth 令牌" })[name];
   }
   $("service-file").value = ""; $("clear-other").checked = false;
   state.dirty = false; $("saved-badge").textContent = state.config.saved ? "已保存到本机" : "尚未保存";
@@ -327,7 +403,7 @@ function renderStatus() {
   $("overview-auth").textContent = current ? authNames[current.authMode] : "未启动";
   $("overview-project").textContent = custom ? "不适用" : shown.projectId || (shown.authMode === "express" ? "Express · 由 API Key 确定" : "—");
   $("overview-location-label").textContent = custom ? "上游" : "地区";
-  $("overview-location").textContent = custom ? upstreamHost(shown.customBaseUrl) : shown.authMode === "express" && !shown.projectId ? "由 Express 决定" : shown.location;
+  $("overview-location").textContent = custom ? formatCustomHosts(shown.customUpstreams, shown.customBaseUrl) : shown.authMode === "express" && !shown.projectId ? "由 Express 决定" : shown.location;
   const models = s.running ? s.models : c.models;
   const hidden = new Set((s.modelAvailability || []).filter(m => m.hidden).map(m => m.id));
   $("overview-anti").textContent = models.length + " 个独立版本" + (s.running ? " · " + hidden.size + " 个已隐藏" : "");
@@ -378,23 +454,32 @@ function addModels(upstreams) {
   if (!modes.length) throw new Error("请至少勾选一种版本。");
   const next = state.models.map(m => ({ ...m })); let added = 0, skipped = 0;
   const custom = draft().authMode === "custom";
+  const channel = custom ? (Number($("discover-channel").value) || 1) : 1;
+  const channelSuffix = custom ? `[${channel}]` : "";
+  const knownUpstreams = new Set(allKnownUpstreamIds());
+  for (const raw of upstreams) if (typeof raw === "string" && raw.trim()) knownUpstreams.add(raw.trim());
   for (const raw of upstreams) {
     let id, upstreamModel;
     if (custom) {
       // A custom upstream gets the name exactly as written; the client name keeps only allowed characters.
       upstreamModel = raw.trim();
       if (!upstreamModel || upstreamModel.length > 200 || /[\u0000-\u001f\u007f]/.test(upstreamModel)) throw new Error(errorMessage("Invalid custom upstream model name"));
-      id = upstreamModel.replace(/^(?:google|models)\//, "").replace(/[^\p{L}\p{N}._@-]+/gu, "-").replace(/^[^\p{L}\p{N}]+|-+$/gu, "") || "model";
+      // Strip any trailing [N] from upstreamModel before building the base client name so we don't produce [1][1].
+      const stripped = upstreamModel.replace(/\[[1-9]\d{0,2}\]$/, "");
+      id = stripped.replace(/^(?:google|models)\//, "").replace(/[^\p{L}\p{N}._@-]+/gu, "-").replace(/^[^\p{L}\p{N}]+|-+$/gu, "") || "model";
     } else {
       id = raw.trim().replace(/^(?:google\/|publishers\/google\/models\/)/, "");
       if (!/^gemini-[a-z0-9][a-z0-9._-]{0,126}(?:@[a-z0-9-]{1,32})?$/.test(id) || id.includes("..")) throw new Error(errorMessage("Invalid upstream Gemini model ID"));
       upstreamModel = "google/" + id;
     }
     for (const mode of modes) {
-      if (next.some(m => m.upstreamModel === upstreamModel && m.mode === mode)) { skipped++; continue; }
+      if (next.some(m => m.upstreamModel === upstreamModel && m.mode === mode && (!custom || parseCustomChannel(m.id)?.channel === channel))) { skipped++; continue; }
       const base = id + ({ normal: "", buffered: "-antitruncation-nonstream", streaming: "-antitruncation-stream" })[mode];
-      let alias = base.slice(0, 150), suffix = 2;
-      while (next.some(m => m.id === alias)) alias = base.slice(0, 150) + "-" + suffix++;
+      let alias = base.slice(0, 145) + channelSuffix, suffix = 2;
+      while (next.some(m => m.id === alias)) alias = base.slice(0, 140) + "-" + suffix++ + channelSuffix;
+      if (custom && knownUpstreams.has(alias)) {
+        throw new Error(`客户端模型名称 ${alias} 与上游模型 ID 重名，请更换模型别名。`);
+      }
       next.push({ id: alias, upstreamModel, mode }); added++;
     }
   }
@@ -485,45 +570,109 @@ async function enter() {
 $("login-form").addEventListener("submit", e => { e.preventDefault(); action(e.submitter, async () => { state.csrf = (await api("/api/login", { key: $("login-key").value })).csrf; await enter(); }, "login-error"); });
 document.querySelectorAll("[data-page],[data-go]").forEach(b => b.addEventListener("click", () => showPage(b.dataset.page || b.dataset.go)));
 // Switching mode changes which credentials the box deletes, so it must be ticked again for the new list.
-document.querySelectorAll('[name="authMode"]').forEach(r => r.addEventListener("change", () => { $("clear-other").checked = false; }));
+document.querySelectorAll('[name="authMode"]').forEach(r => r.addEventListener("change", () => {
+  $("clear-other").checked = false;
+  if (r.value === "custom" && state.models.length === 1 && state.models[0].id === "gemini-3.7-flash-antitruncation" && state.models[0].upstreamModel === "google/gemini-3.7-flash") {
+    state.models[0].id = "gemini-3.7-flash-antitruncation[1]";
+    state.models[0].upstreamModel = "gemini-3.7-flash";
+    renderModels();
+  } else if (r.value !== "custom" && state.models.length === 1 && state.models[0].id === "gemini-3.7-flash-antitruncation[1]" && state.models[0].upstreamModel === "gemini-3.7-flash") {
+    state.models[0].id = "gemini-3.7-flash-antitruncation";
+    state.models[0].upstreamModel = "google/gemini-3.7-flash";
+    renderModels();
+  }
+}));
+$("add-custom-upstream").addEventListener("click", () => {
+  if (state.customUpstreams.length >= 32) return;
+  state.customUpstreams.push({ baseUrl: "", apiKey: "", apiKeySet: false, savedIndex: null });
+  renderCustomUpstreams(); updateDraft();
+  const inputs = $("custom-upstream-rows").querySelectorAll('[data-custom-field="baseUrl"]');
+  inputs[inputs.length - 1]?.focus();
+});
+$("custom-upstream-rows").addEventListener("input", e => {
+  const field = e.target.dataset.customField, row = e.target.closest("[data-custom-row]");
+  if (!field || !row) return;
+  state.customUpstreams[Number(row.dataset.customRow)][field] = e.target.value;
+  updateDraft();
+});
+$("custom-upstream-rows").addEventListener("click", e => {
+  const button = e.target.closest("[data-remove-custom]");
+  if (!button || state.customUpstreams.length <= 1) return;
+  const index = Number(button.dataset.removeCustom);
+  state.customUpstreams.splice(index, 1);
+  renderCustomUpstreams(); updateDraft();
+  toast(`已移除原渠道 ${index + 1}，后续渠道编号已顺延更新。请注意检查模型的 [渠道编号] 后缀。`);
+});
 $("settings-form").addEventListener("input", () => updateDraft());
 $("settings-form").addEventListener("change", () => updateDraft());
 async function saveConfiguration() {
-  const result = await api("/api/config", { settings: draft(), revision: state.config.revision });
+  const result = await api("/api/config", { settings: draft(), revision: state.config.revision, upstreamIds: allKnownUpstreamIds() });
   state.config = result; fillConfig(); await refresh(); toast("配置已保存并应用，网关正在运行。");
   setError("form-error", ""); setError("models-error", ""); setError("global-error", "");
   void checkUpstreamNames();
 }
-// After a save, compare a custom upstream's saved model names with its own model list. It only
-// lists models, so it costs nothing; a mismatch is a warning, since some lists are incomplete.
+// After a save, compare each custom upstream channel's saved model names with its own model list.
+// It also checks whether any client model ID conflicts with an upstream model ID.
 async function checkUpstreamNames() {
   setError("models-name-warning", "");
-  const names = [...new Set(state.config.settings.models.map(m => m.upstreamModel))];
-  if (state.config.settings.authMode !== "custom" || !names.length) return;
-  let listed;
-  try { listed = (await api("/api/models/discover", { settings: {} })).ids; }
-  catch { return setError("models-name-warning", "已保存，但读不到上游的模型列表，没能核对上游模型名。请自行确认这些名字和上游一致。"); }
+  const models = state.config.settings.models || [];
+  if (state.config.settings.authMode !== "custom" || !models.length) return;
+  const channels = [...new Set(models.map(m => parseCustomChannel(m.id)?.channel).filter(Boolean))];
+  const missing = [], conflicts = [];
   const key = name => /gemini-[a-z0-9][a-z0-9._-]*/i.exec(name)?.[0].toLowerCase();
-  const missing = names.filter(name => !listed.includes(name)).map(name => {
-    const similar = listed.filter(id => key(id) && key(id) === key(name)).slice(0, 3);
-    return name + (similar.length ? `（列表里有：${similar.join("、")}）` : "");
-  });
+  for (const ch of channels) {
+    let listed;
+    try {
+      listed = (await api("/api/models/discover", { settings: {}, channel: ch })).ids;
+      state.upstreamIdsByChannel[ch] = listed;
+    } catch {
+      return setError("models-name-warning", `已保存，但读不到渠道 ${ch} 的模型列表，没能核对上游模型名。请自行确认这些名字和上游一致。`);
+    }
+    const chModels = models.filter(m => parseCustomChannel(m.id)?.channel === ch);
+    for (const m of chModels) {
+      if (listed.includes(m.id)) conflicts.push(m.id);
+    }
+    const names = [...new Set(chModels.map(m => m.upstreamModel))];
+    for (const name of names) {
+      if (!listed.includes(name)) {
+        const similar = listed.filter(id => key(id) && key(id) === key(name)).slice(0, 3);
+        missing.push(`[${ch}] ${name}` + (similar.length ? `（列表里有：${similar.join("、")}）` : ""));
+      }
+    }
+  }
+  if (conflicts.length) {
+    setError("models-name-warning", `检测到客户端模型名称与上游已有模型 ID 重名：${[...new Set(conflicts)].join("、")}，请更换模型别名后重新保存。`);
+    toast("检测到客户端模型名称与上游模型 ID 重名，请更换模型别名。");
+    return;
+  }
   if (!missing.length) return;
-  setError("models-name-warning", `已保存。以下上游模型名不在上游的模型列表里，请求时可能找不到模型：${missing.join("；")}。可以在下方改成列表里的名字；如果上游的列表本来就不全，可以忽略。`);
+  setError("models-name-warning", `已保存。以下上游模型名不在对应渠道的模型列表里，请求时可能找不到模型：${missing.join("；")}。可以在下方改成列表里的名字；如果上游的列表本来就不全，可以忽略。`);
   toast(`已保存。有 ${missing.length} 个上游模型名不在上游的模型列表里，详见“模型与版本”。`);
 }
 async function discardConfiguration() {
   state.config = await api("/api/config"); fillConfig(); setError("form-error", ""); setError("models-error", ""); toast("已重新加载保存的配置。");
 }
 $("settings-form").addEventListener("submit", e => { e.preventDefault(); action($("save-button"), saveConfiguration, "form-error"); });
-$("validate-button").addEventListener("click", e => action(e.currentTarget, async () => { await api("/api/validate", { settings: draft() }); toast("本地配置校验通过，未调用 Google。端口是否可用会在保存时检查。"); }, "form-error"));
+$("validate-button").addEventListener("click", e => action(e.currentTarget, async () => { await api("/api/validate", { settings: draft(), upstreamIds: allKnownUpstreamIds() }); toast("本地配置校验通过，未调用 Google。端口是否可用会在保存时检查。"); }, "form-error"));
 $("discard-button").addEventListener("click", e => action(e.currentTarget, discardConfiguration, "form-error"));
 $("models-save").addEventListener("click", e => action(e.currentTarget, saveConfiguration, "models-error"));
 $("models-discard").addEventListener("click", e => action(e.currentTarget, discardConfiguration, "models-error"));
+$("discover-channel").addEventListener("change", () => {
+  state.selected.clear(); state.catalog = null;
+  $("catalog-list").innerHTML = '<div class="empty-state"><strong>已切换渠道，请点击“拉取 Model List”</strong><p>为避免不同渠道的模型混在一起，切换渠道后已清空当前选择列表。</p></div>';
+  $("catalog-status").textContent = "已切换渠道，尚未拉取目录";
+  updateSelection();
+});
 $("discover-button").addEventListener("click", e => action(e.currentTarget, async () => {
-  const result = await api("/api/models/discover", { settings: draft() });
+  const custom = draft().authMode === "custom";
+  const channel = custom ? (Number($("discover-channel").value) || 1) : 1;
+  // Clear selection and catalog list before fetching so models from different channels never mix.
+  state.selected.clear(); state.catalog = []; renderCatalog();
+  $("catalog-status").textContent = custom ? `正在拉取渠道 ${channel} 的模型目录…` : "正在拉取目录…";
+  const result = await api("/api/models/discover", { settings: draft(), ...(custom ? { channel } : {}) });
+  if (custom && Array.isArray(result.ids)) state.upstreamIdsByChannel[channel] = result.ids;
   state.catalog = result.models; state.selected.clear(); renderCatalog();
-  $("catalog-status").textContent = `${new Date(result.fetchedAt).toLocaleTimeString("zh-CN", { hour12: false })} 已拉取 · ${result.models.length} 个 Gemini 模型`;
+  $("catalog-status").textContent = `${new Date(result.fetchedAt).toLocaleTimeString("zh-CN", { hour12: false })} 已拉取${custom ? `（渠道 ${channel}）` : ""} · ${result.models.length} 个 Gemini 模型`;
 }, "discovery-error"));
 $("catalog-search").addEventListener("input", renderCatalog);
 $("catalog-list").addEventListener("change", e => {

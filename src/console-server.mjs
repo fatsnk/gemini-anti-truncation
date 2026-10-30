@@ -54,6 +54,7 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
       modelAvailability: gateway?.modelAvailability() || [],
       active: activeConfig ? { port: activeConfig.port, projectId: activeConfig.projectId, location: activeConfig.location, authMode: activeConfig.authMode,
         customBaseUrl: activeConfig.authMode === "custom" ? activeConfig.baseUrl : "",
+        customUpstreams: activeConfig.authMode === "custom" ? (activeConfig.customUpstreams || []).map(u => ({ channel: u.channel, baseUrl: u.baseUrl })) : [],
         unicodeInput: activeConfig.unicodeInput, imageInput: activeConfig.imageInput, contextInTool: activeConfig.contextInTool, serviceTier: activeConfig.serviceTier, antiTruncation: activeConfig.antiTruncation,
         geminiPromptRetryEnabled: activeConfig.geminiPromptRetry.enabled } : null,
       requests: events.length, successes: events.filter(e => e.status >= 200 && e.status < 300).length,
@@ -75,12 +76,15 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
   async function apply(body, sessionId) {
     const latest = await store.load();
     if (body.revision !== latest.revision) throw new SettingsError("Configuration changed; reload before saving", 409);
-    const next = mergeSettings(latest.settings, body.settings);
+    const next = mergeSettings(latest.settings, body.settings, { upstreamIds: body.upstreamIds });
     // The first save starts from environment values, which can hold another mode's credential
     // (for example a system-wide GOOGLE_APPLICATION_CREDENTIALS). Keep only the selected mode's
     // credential unless this save entered the other one.
-    if (!latest.saved) for (const [mode, name] of AUTH_CREDENTIALS) if (next.authMode !== mode && next[name] === latest.settings[name]) next[name] = "";
-    const config = buildConfig(next);
+    if (!latest.saved) for (const [mode, name] of AUTH_CREDENTIALS) if (next.authMode !== mode && next[name] === latest.settings[name]) {
+      next[name] = "";
+      if (mode === "custom") { next.customUpstreams = null; next.customBaseUrl = ""; }
+    }
+    const config = buildConfig(next, { upstreamIds: body.upstreamIds });
     assertSeparatePorts(config);
     // Bind the replacement first. A port conflict or failed disk write leaves the
     // original listener/configuration intact. Existing streams drain on their snapshot.
@@ -170,8 +174,9 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
       }
       const body = await readJson(req);
       if (path === "/api/models/discover") {
-        const next = mergeSettings((await store.load()).settings, body.settings, { connectionOnly: true });
-        return json(res, 200, await whileConnected(res, signal => discoverModels(buildConnectionConfig(next), { fetchImpl, signal })));
+        const channel = body.channel ?? null;
+        const next = mergeSettings((await store.load()).settings, body.settings, { connectionOnly: true, channel });
+        return json(res, 200, await whileConnected(res, signal => discoverModels(buildConnectionConfig(next, { channel }), { fetchImpl, signal })));
       }
       if (path === "/api/probe") {
         if (body?.confirm !== true) throw new SettingsError("A paid test must be explicitly requested");
@@ -205,7 +210,7 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
       busy = true;
       try {
         if (path === "/api/config") await apply(body, sessionId);
-        if (path === "/api/validate") { assertSeparatePorts(buildConfig(mergeSettings((await store.load()).settings, body.settings))); return json(res, 200, { valid: true }); }
+        if (path === "/api/validate") { assertSeparatePorts(buildConfig(mergeSettings((await store.load()).settings, body.settings, { upstreamIds: body.upstreamIds }), { upstreamIds: body.upstreamIds })); return json(res, 200, { valid: true }); }
         if (path === "/api/start") {
           saved = await store.load();
           // Like autostart, keep the reason in status so the overview does not show an older one.

@@ -9,7 +9,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   projectId: "", location: "global", authMode: "service-account", serviceTier: "standard",
   port: 4781, timeoutMs: 600000, antiTruncation: true, contextInTool: false, models: null,
   hideUnavailableModels: true, geminiPrefillToUser: true, geminiLongDecode: false, unicodeInput: false, imageInput: "off",
-  geminiPromptRetryEnabled: false, geminiPromptRetryText: "", geminiPromptRetryMatches: null, customBaseUrl: "",
+  geminiPromptRetryEnabled: false, geminiPromptRetryText: "", geminiPromptRetryMatches: null, customBaseUrl: "", customUpstreams: null,
   gatewayKey: "", serviceAccountJson: "", apiKey: "", accessToken: "", customApiKey: "",
 });
 export const SECRET_FIELDS = ["gatewayKey", "serviceAccountJson", "apiKey", "accessToken", "customApiKey"];
@@ -66,25 +66,42 @@ export async function settingsFromEnv(env = process.env) {
 
 // An OpenAI-compatible service that serves Gemini models. It has no Vertex project, region,
 // service tier or native endpoint, so every request keeps the compatible format.
-function customConnection(s, requireAscii) {
-  const raw = s.customBaseUrl;
-  let url;
-  try { url = new URL(raw); } catch { throw new Error("Invalid CUSTOM_UPSTREAM_URL"); }
-  if (typeof raw !== "string" || raw.length > 2048 || /[?#]/.test(raw) || !["https:", "http:"].includes(url.protocol) || url.username || url.password) {
-    throw new Error("Invalid CUSTOM_UPSTREAM_URL");
+function customConnection(s, requireAscii, channel = null) {
+  const rawList = Array.isArray(s.customUpstreams) && s.customUpstreams.length
+    ? s.customUpstreams
+    : [{ baseUrl: s.customBaseUrl, apiKey: s.customApiKey }];
+  if (!rawList.length || rawList.length > 32) throw new Error("Invalid CUSTOM_UPSTREAM_URL");
+  const customUpstreams = rawList.map((entry, idx) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("Invalid CUSTOM_UPSTREAM_URL");
+    const raw = entry.baseUrl;
+    let url;
+    try { url = new URL(raw); } catch { throw new Error("Invalid CUSTOM_UPSTREAM_URL"); }
+    if (typeof raw !== "string" || raw.length > 2048 || /[?#]/.test(raw) || !["https:", "http:"].includes(url.protocol) || url.username || url.password) {
+      throw new Error("Invalid CUSTOM_UPSTREAM_URL");
+    }
+    const key = entry.apiKey;
+    if (typeof key !== "string" || !key || /\s/.test(key) || key.length > 8192) throw new Error("Invalid CUSTOM_UPSTREAM_API_KEY");
+    if (requireAscii && !visibleAscii(key)) throw new Error("CUSTOM_UPSTREAM_API_KEY must contain only visible ASCII characters");
+    // A pasted endpoint works as well as its base: requests go to <base>/chat/completions.
+    const baseUrl = url.href.replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
+    return { channel: idx + 1, baseUrl, accessToken: async () => key };
+  });
+  let selected = customUpstreams[0];
+  if (channel != null) {
+    const index = Number(channel) - 1;
+    if (!Number.isInteger(index) || index < 0 || index >= customUpstreams.length) throw new Error("Invalid custom upstream channel");
+    selected = customUpstreams[index];
   }
-  const key = s.customApiKey;
-  if (typeof key !== "string" || !key || /\s/.test(key) || key.length > 8192) throw new Error("Invalid CUSTOM_UPSTREAM_API_KEY");
-  if (requireAscii && !visibleAscii(key)) throw new Error("CUSTOM_UPSTREAM_API_KEY must contain only visible ASCII characters");
-  // A pasted endpoint works as well as its base: requests go to <base>/chat/completions.
-  const baseUrl = url.href.replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
-  return { accessToken: async () => key, authMode: "custom", serviceTier: "standard", projectId: "", location: "", baseUrl, tierHeaders: {}, nativeOnly: false };
+  return {
+    accessToken: selected.accessToken, authMode: "custom", serviceTier: "standard",
+    projectId: "", location: "", baseUrl: selected.baseUrl, customUpstreams, tierHeaders: {}, nativeOnly: false,
+  };
 }
 
-export function buildConnectionConfig(settings, { requireAscii = true } = {}) {
+export function buildConnectionConfig(settings, { requireAscii = true, channel = null } = {}) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   if (!["service-account", "express", "access-token", "custom"].includes(s.authMode)) throw new Error("Invalid authentication mode");
-  if (s.authMode === "custom") return customConnection(s, requireAscii);
+  if (s.authMode === "custom") return customConnection(s, requireAscii, channel);
   if (!["standard", "flex", "priority"].includes(s.serviceTier)) throw new Error("Invalid service tier");
   if (typeof s.projectId !== "string" || (s.projectId && !/^[a-zA-Z0-9][a-zA-Z0-9-]{0,127}$/.test(s.projectId))) throw new Error("Invalid VERTEX_PROJECT_ID");
   if (s.authMode !== "express" && !s.projectId) throw new Error("Invalid VERTEX_PROJECT_ID");
@@ -121,7 +138,7 @@ export function buildConnectionConfig(settings, { requireAscii = true } = {}) {
   };
 }
 
-export function buildConfig(settings, { requireAscii = true } = {}) {
+export function buildConfig(settings, { requireAscii = true, upstreamIds = null } = {}) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   const key = s.gatewayKey;
   if (typeof key !== "string" || key.length < 16 || key.length > 512 || /\s/.test(key) || /^(change|replace|your)[-_ ]?me/i.test(key)) {
@@ -143,9 +160,14 @@ export function buildConfig(settings, { requireAscii = true } = {}) {
       matches.some(text => typeof text !== "string" || !text.trim() || text.length > 500))) {
     throw new Error("Prompt retry error matches must list 1-32 texts of at most 500 characters");
   }
-  const models = modelProfiles(s.models, s.antiTruncation, { custom: s.authMode === "custom" });
+  const connection = buildConnectionConfig(s, { requireAscii });
+  const models = modelProfiles(s.models, s.antiTruncation, {
+    custom: s.authMode === "custom",
+    channelCount: s.authMode === "custom" ? connection.customUpstreams.length : null,
+    upstreamIds,
+  });
   return {
-    ...buildConnectionConfig(s, { requireAscii }), gatewayKey: key, models,
+    ...connection, gatewayKey: key, models,
     hideUnavailableModels: s.hideUnavailableModels, geminiPrefillToUser: s.geminiPrefillToUser, geminiLongDecode: s.geminiLongDecode, unicodeInput: s.unicodeInput, imageInput: s.imageInput, contextInTool: s.contextInTool,
     geminiPromptRetry: { enabled: s.geminiPromptRetryEnabled, text: s.geminiPromptRetryText, ...(matches ? { errorMatches: matches } : {}) },
     // Legacy fields remain available to CLI integrations; profiles own behavior.
@@ -166,7 +188,15 @@ export async function loadConfig(env = process.env) {
 }
 
 export function publicSettings(settings) {
-  const result = { ...settings, models: modelProfiles(settings.models, settings.antiTruncation, { custom: settings.authMode === "custom" }) };
+  const rawUpstreams = Array.isArray(settings.customUpstreams) && settings.customUpstreams.length
+    ? settings.customUpstreams
+    : (settings.customBaseUrl || settings.customApiKey ? [{ baseUrl: settings.customBaseUrl || "", apiKey: settings.customApiKey || "" }] : []);
+  const customUpstreams = rawUpstreams.map(item => ({
+    baseUrl: typeof item?.baseUrl === "string" ? item.baseUrl : "",
+    apiKeySet: Boolean(item?.apiKey),
+  }));
+  const result = { ...settings, customUpstreams, models: modelProfiles(settings.models, settings.antiTruncation, { custom: settings.authMode === "custom" }) };
   for (const name of SECRET_FIELDS) { delete result[name]; result[name + "Set"] = Boolean(settings[name]); }
+  if (customUpstreams.length) result.customApiKeySet = customUpstreams.every(u => u.apiKeySet);
   return result;
 }
