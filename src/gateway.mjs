@@ -18,6 +18,7 @@ import { fetchLongDecode, longDecodeUrl } from "./vertex-long-decode.mjs";
 import { documentedUnsupported, dropParams } from "./unsupported-params.mjs";
 import { googleErrorDetail, trafficType, upstreamErrorLogFields } from "./wire.mjs";
 import { waitWithSignal } from "./abort.mjs";
+import { tapUpstreamResponse } from "./raw-response-log.mjs";
 
 class Problem extends Error {
   constructor(status, code) { super(code); this.status = status; this.code = code; }
@@ -132,7 +133,7 @@ export function upstreamDispatcher(timeoutMs) {
 
 // fetchImpl exists for local protocol fixtures; HTTP clients cannot choose hosts,
 // credentials or the upstream model. Only the saved configuration names the upstream.
-export function createGatewayServer(configSource, { fetchImpl = fetch, logger = () => {} } = {}) {
+export function createGatewayServer(configSource, { fetchImpl = fetch, logger = () => {}, rawLogStore = null } = {}) {
   const events = [];
   // Reapplying settings or restarting starts a fresh availability observation.
   // Temporary errors (including 403/404/429) never remove models from the list.
@@ -183,6 +184,8 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
     let unicode = null, image = null, outputLimit = null;
     let stream = false, audit = null, integrity = null, status = 500, code = null, route, droppedParams = [], upstreamError = null, credential = null;
     const compatibility = { prefillConverted: false, promptRetried: false };
+    const recordRaw = Boolean(rawLogStore && config.recordRawResponses === true);
+    const rawAttempts = [];
     try {
       let payload = await readRequest(request, config.bodyLimitBytes, signal);
       validate(payload);
@@ -280,9 +283,28 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
       // Errors while reading a body that has started keep their protocol handling.
       const post = body => {
         if (longDecode) outputLimit.requests = (outputLimit.requests ?? 0) + 1;
+        const attemptIndex = rawAttempts.length + 1;
         return fetchImpl(url, { method: "POST", redirect: "error", signal, dispatcher,
           headers: { ...authentication, ...config.tierHeaders, "content-type": "application/json", accept: upstreamStream ? "text/event-stream" : "application/json" },
-          body: JSON.stringify(body) }).catch(error => {
+          body: JSON.stringify(body) }).then(rawRes => {
+          if (!recordRaw) return rawRes;
+          const tapped = tapUpstreamResponse(rawRes, {
+            url,
+            attempt: attemptIndex,
+            maxBytes: config.bodyLimitBytes,
+            shouldDrainOnCancel: () => !client.signal.aborted && !deadline.aborted,
+          });
+          rawAttempts.push(tapped.record);
+          return tapped.response;
+        }, error => {
+          if (recordRaw) {
+            rawAttempts.push({
+              attempt: attemptIndex,
+              url,
+              status: null,
+              networkError: error?.cause?.code || error?.cause?.message || error?.message || "fetch_failed",
+            });
+          }
           throw error instanceof TypeError ? new Problem(502, error.cause ? "upstream_unreachable" : "credential_error") : error;
         });
       };
@@ -385,7 +407,10 @@ export function createGatewayServer(configSource, { fetchImpl = fetch, logger = 
         trafficType: ["ON_DEMAND", "ON_DEMAND_FLEX", "ON_DEMAND_PRIORITY", "PROVISIONED_THROUGHPUT"].includes(audit?.trafficType) ? audit.trafficType : null,
         ...imageInputLogFields(image), ...unicodeInputLogFields(unicode), ...antiTruncationLogFields(audit), ...integrityLogFields(integrity), ...compatibilityLogFields(compatibility),
         ...upstreamErrorLogFields(upstreamError), ...(droppedParams.length ? { droppedParams } : {}), ...(outputLimit ? { outputLimit } : {}), ...(code ? { code } : {}),
-        ...(tokens ? { usage: tokens, estimatedCostUsd: cost } : {}) };
+        ...(tokens ? { usage: tokens, estimatedCostUsd: cost } : {}), ...(recordRaw ? { rawLogged: true } : {}) };
+      if (recordRaw) {
+        await rawLogStore.record(event, rawAttempts, { limit: config.rawResponseLimit || 10, credential }).catch(() => {});
+      }
       events.push(event);
       if (events.length > 200) events.shift();
       logger(event);

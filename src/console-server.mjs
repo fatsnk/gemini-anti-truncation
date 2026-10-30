@@ -7,6 +7,7 @@ import { createSettingsStore, mergeSettings, SettingsError } from "./settings-st
 import { createGatewayServer, upstreamDispatcher } from "./gateway.mjs";
 import { discoverModels } from "./model-discovery.mjs";
 import { loadNetworkConfig, consoleRequestAccess } from "./network-config.mjs";
+import { createRawResponseLogStore } from "./raw-response-log.mjs";
 
 const assets = new Map([["/", ["index.html", "text/html"]], ["/app.css", ["app.css", "text/css"]], ["/app.js", ["app.js", "text/javascript"]], ["/favicon.svg", ["favicon.svg", "image/svg+xml"]]]);
 const equal = (a, b) => typeof a === "string" && typeof b === "string" && a.length > 0 && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -38,13 +39,19 @@ const AUTH_CREDENTIALS = [["service-account", "serviceAccountJson"], ["express",
 
 export async function createConsole({ store = createSettingsStore(), fetchImpl = fetch, logger = () => {}, autoStart = true, network = loadNetworkConfig() } = {}) {
   let saved = await store.load();
+  const rawLogStore = createRawResponseLogStore({ directory: store.directory });
+  let runtimeRawLog = { enabled: saved.settings.recordRawResponses === true, limit: saved.settings.rawResponseLimit || 10 };
   let activeConfig, gateway, gatewayRef, runtimeError = saved.envError ? "Environment settings were ignored: " + saved.envError : null, busy = false;
   const retired = new Set(), events = [], sessions = new Map();
   const bootstrapToken = saved.settings.gatewayKey ? null : randomBytes(32).toString("hex");
   let failures = 0, blockedUntil = 0;
   const startedAt = Date.now();
   const log = event => { events.unshift(event); if (events.length > 200) events.pop(); logger(event); };
-  const makeGateway = config => createGatewayServer(config, { fetchImpl, logger: log });
+  const makeGateway = config => createGatewayServer(config, { fetchImpl, logger: log, rawLogStore });
+  const currentRawLogState = () => ({
+    enabled: activeConfig ? activeConfig.recordRawResponses === true : runtimeRawLog.enabled,
+    limit: activeConfig ? (activeConfig.rawResponseLimit || 10) : runtimeRawLog.limit,
+  });
   const assertSeparatePorts = config => { if (server.address()?.port === config.port) throw new SettingsError("Gateway and console must use different ports"); };
   const activeRequests = () => (gateway?.gatewayStats().active || 0) + [...retired].reduce((n, s) => n + s.gatewayStats().active, 0);
   function status() {
@@ -59,9 +66,10 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
         geminiPromptRetryEnabled: activeConfig.geminiPromptRetry.enabled } : null,
       requests: events.length, successes: events.filter(e => e.status >= 200 && e.status < 300).length,
       restored: events.filter(e => e.antiTruncation?.restored === true).length,
+      rawLog: currentRawLogState(),
       lastTrafficType: events.find(e => e.trafficType)?.trafficType || null };
   }
-  async function start(config = buildConfig(saved.settings)) {
+  async function start(config = buildConfig(saved.saved ? saved.settings : { ...saved.settings, recordRawResponses: runtimeRawLog.enabled, rawResponseLimit: runtimeRawLog.limit })) {
     if (gateway?.listening) return;
     assertSeparatePorts(config);
     const ref = { current: config };
@@ -96,6 +104,8 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
     }
     try { saved = await store.save(next, body.revision); }
     catch (error) { candidate?.closeAllConnections(); await close(candidate); throw error; }
+    runtimeRawLog = { enabled: next.recordRawResponses === true, limit: next.rawResponseLimit || 10 };
+    await rawLogStore.prune(runtimeRawLog.limit).catch(() => {});
     if (candidate) {
       const old = gateway; gateway = candidate; gatewayRef = ref;
       if (old) {
@@ -133,7 +143,8 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
       const access = consoleRequestAccess(req.headers, port, network.guiOrigin);
       if (!access.allowed) throw new SettingsError("Console host or origin is not allowed", 403);
       const cookieFlags = `HttpOnly; SameSite=Strict; Path=/${access.secure ? "; Secure" : ""}`;
-      const path = new URL(req.url, "http://localhost").pathname;
+      const parsedUrl = new URL(req.url, "http://localhost");
+      const path = parsedUrl.pathname;
       if (req.method === "GET" && assets.has(path)) {
         const [file, type] = assets.get(path);
         const bytes = await readFile(new URL("../public/" + file, import.meta.url));
@@ -162,10 +173,19 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
       if (!session) throw new SettingsError("Please sign in", 401);
       if (req.method === "GET" && path === "/api/config") {
         const current = await store.load();
-        return json(res, 200, { settings: publicSettings(current.settings), revision: current.revision, saved: current.saved });
+        if (current.saved) runtimeRawLog = { enabled: current.settings.recordRawResponses === true, limit: current.settings.rawResponseLimit || 10 };
+        const effectiveSettings = current.saved ? current.settings : { ...current.settings, recordRawResponses: runtimeRawLog.enabled, rawResponseLimit: runtimeRawLog.limit };
+        return json(res, 200, { settings: publicSettings(effectiveSettings), revision: current.revision, saved: current.saved });
       }
       if (req.method === "GET" && path === "/api/status") return json(res, 200, status());
-      if (req.method === "GET" && path === "/api/events") return json(res, 200, { events });
+      if (req.method === "GET" && path === "/api/events") return json(res, 200, { events, rawLogs: await rawLogStore.list(), rawLog: currentRawLogState() });
+      if (req.method === "GET" && path === "/api/raw-logs") {
+        const id = parsedUrl.searchParams.get("id");
+        if (!id) return json(res, 200, { rawLogs: await rawLogStore.list(), rawLog: currentRawLogState() });
+        const record = await rawLogStore.get(id);
+        if (!record) throw new SettingsError("Raw response log not found", 404);
+        return json(res, 200, { record });
+      }
       if (req.method !== "POST") throw new SettingsError("Not found", 404);
       if (!equal(req.headers["x-csrf-token"], session.csrf)) throw new SettingsError("Session verification failed", 403);
       if (path === "/api/logout") {
@@ -173,6 +193,33 @@ export async function createConsole({ store = createSettingsStore(), fetchImpl =
         return json(res, 200, { ok: true });
       }
       const body = await readJson(req);
+      if (path === "/api/raw-logs/clear") {
+        await rawLogStore.clear();
+        return json(res, 200, { rawLogs: [] });
+      }
+      if (path === "/api/raw-logs/settings") {
+        if (typeof body?.recordRawResponses !== "boolean") throw new SettingsError("Invalid compatibility toggle");
+        const limit = body?.rawResponseLimit == null || body?.rawResponseLimit === "" ? runtimeRawLog.limit : Number(body.rawResponseLimit);
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new SettingsError("Invalid RAW_RESPONSE_LIMIT");
+        if (busy) throw new SettingsError("Another operation is in progress", 409);
+        busy = true;
+        try {
+          const latest = await store.load();
+          runtimeRawLog = { enabled: body.recordRawResponses, limit };
+          if (latest.saved) {
+            const updatedSettings = { ...latest.settings, recordRawResponses: body.recordRawResponses, rawResponseLimit: limit };
+            saved = await store.save(updatedSettings, latest.revision);
+          } else {
+            saved = { ...latest, settings: { ...latest.settings, recordRawResponses: body.recordRawResponses, rawResponseLimit: limit } };
+          }
+          if (activeConfig && gatewayRef) {
+            activeConfig = { ...activeConfig, recordRawResponses: body.recordRawResponses, rawResponseLimit: limit };
+            gatewayRef.current = activeConfig;
+          }
+          const rawLogs = await rawLogStore.prune(limit);
+          return json(res, 200, { rawLog: runtimeRawLog, rawLogs, revision: saved.revision, saved: saved.saved });
+        } finally { busy = false; }
+      }
       if (path === "/api/models/discover") {
         const channel = body.channel ?? null;
         const next = mergeSettings((await store.load()).settings, body.settings, { connectionOnly: true, channel });

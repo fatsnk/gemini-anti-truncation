@@ -9,7 +9,7 @@ const transportNames = { "tool-transport-native-streaming": "原生参数流", "
   "structured-output": "跳过：结构化输出", "multiple-candidates": "跳过：多候选", "tool-history": "跳过：旧版 function 历史", unknown: "未知" };
 const consoleDown = "无法连接本地控制台，请确认控制台进程仍在运行。";
 const replyInterrupted = "回复中途中断（网关已断开连接），请按请求 ID 在请求日志查看错误码。";
-const state = { csrf: null, config: null, status: null, events: [], dirty: false, page: "overview", probe: null, timer: null,
+const state = { csrf: null, config: null, status: null, events: [], rawLogs: [], activeRawLogId: null, dirty: false, page: "overview", probe: null, timer: null,
   models: [], catalog: null, selected: new Set(), forcedGlobal: false, userLocation: "global", pendingDraft: null, refreshError: null, rendered: {},
   customUpstreams: [], upstreamIdsByChannel: {} };
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -74,6 +74,8 @@ function errorMessage(message) {
     "Model list must contain at most 100 entries": "最多可保存 100 个模型版本。",
     "Invalid model enabled setting": "模型的启用状态必须是开或关。",
     "Invalid compatibility toggle": "兼容功能的开关必须是开或关。",
+    "Invalid RAW_RESPONSE_LIMIT": "原始返回保留条数须为 1–100 之间的整数。",
+    "Raw response log not found": "未找到该请求的原始返回记录（可能已被新请求轮转覆盖或已清空）。",
     "Enter custom text before enabling prompt retry": "请先填写自定义文本，再开启提示词提交失败重试。",
     "Prompt retry text must be at most 192000 UTF-8 bytes": "重试文本不能超过 192000 个 UTF-8 字节。",
     "prompt_submission_failed": "上游仍未接受提示词（The prompt could not be submitted），请调整提示词后重试。",
@@ -181,7 +183,7 @@ async function action(button, fn, errorId = "global-error") {
   const previous = button.innerHTML; button.disabled = true; button.textContent = "处理中…"; button.setAttribute("aria-busy", "true");
   setError(errorId, "");
   try { await fn(); } catch (error) { setError(errorId, error.message); $(errorId).scrollIntoView({ block: "nearest" }); }
-  finally { for (const [el, disabled] of controls) el.disabled = disabled; button.disabled = false; button.innerHTML = previous; button.removeAttribute("aria-busy"); if (controls.length) updateDraft(false); }
+  finally { for (const [el, disabled] of controls) el.disabled = disabled; button.disabled = false; button.innerHTML = previous; button.removeAttribute("aria-busy"); if (controls.length) updateDraft(false); if (errorId === "raw-log-error") renderRawLogs(); }
 }
 function showPage(page) {
   state.page = page;
@@ -272,6 +274,7 @@ function draft() {
     customApiKey: authMode === "custom" ? (state.customUpstreams[0]?.apiKey.trim() || "") : clearCustom ? null : "",
     port: Number($("port").value), timeoutMs: Number($("timeout").value) * 1000, antiTruncation: true, models: state.models.map(m => ({ ...m })),
     unicodeInput: $("unicode-input").checked, imageInput: $("image-input").value, contextInTool: $("context-in-tool").checked, hideUnavailableModels: $("hide-unavailable").checked, geminiPrefillToUser: $("prefill-to-user").checked,
+    recordRawResponses: $("raw-log-enabled").checked, rawResponseLimit: Number($("raw-log-limit").value) || 10,
     geminiLongDecode: $("long-decode").checked, geminiPromptRetryEnabled: $("prompt-retry-enabled").checked, geminiPromptRetryText: $("prompt-retry-text").value,
     geminiPromptRetryMatches: retryMatches() };
 }
@@ -362,6 +365,8 @@ function fillConfig(c = state.config.settings) {
   $("context-in-tool").checked = c.contextInTool === true;
   $("hide-unavailable").checked = c.hideUnavailableModels !== false;
   $("prefill-to-user").checked = c.geminiPrefillToUser !== false;
+  $("raw-log-enabled").checked = c.recordRawResponses === true;
+  $("raw-log-limit").value = c.rawResponseLimit || 10;
   $("long-decode").checked = c.geminiLongDecode === true;
   $("prompt-retry-enabled").checked = c.geminiPromptRetryEnabled === true;
   $("prompt-retry-text").value = c.geminiPromptRetryText || "";
@@ -518,15 +523,73 @@ function usageCell(e) {
     : '<small title="自定义上游、预配吞吐量和价目表未收录的模型不估算">无官方单价</small>';
   return `<td><span class="mono">${count(u.promptTokens)} 入 · ${count(u.outputTokens)} 出</span>${u.cachedTokens ? `<small>其中缓存 ${count(u.cachedTokens)}</small>` : ""}${price}</td>`;
 }
+const formatBytes = n => {
+  const num = Number(n) || 0;
+  if (num < 1024) return num + " B";
+  if (num < 1024 * 1024) return (num / 1024).toFixed(1) + " KB";
+  return (num / (1024 * 1024)).toFixed(2) + " MB";
+};
+function renderRawLogs() {
+  const enabled = $("raw-log-enabled").checked;
+  const list = state.rawLogs || [];
+  const limit = Number($("raw-log-limit").value) || 10;
+  $("raw-log-clear").disabled = !list.length;
+  $("raw-log-section").hidden = !enabled && !list.length;
+  $("raw-log-count").textContent = `已保存 ${list.length} / ${limit} 条`;
+  if (state.activeRawLogId && !list.some(r => r.requestId === state.activeRawLogId)) {
+    state.activeRawLogId = null;
+    $("raw-log-viewer").hidden = true;
+  }
+  const html = list.length ? list.map(r => {
+    const ok = r.status >= 200 && r.status < 300;
+    const active = r.requestId === state.activeRawLogId;
+    const time = new Date(r.at).toLocaleString("zh-CN", { hour12: false });
+    return `<div class="raw-log-item${active ? " active" : ""}">
+      <div class="raw-log-item-main">
+        <span class="badge ${ok ? "go" : "stop"}">${esc(r.status)}</span>
+        <span class="mono">${esc(time)}</span>
+        <strong class="mono">${esc(r.model || "—")}</strong>
+        ${r.code ? `<span class="small muted mono">${esc(r.code)}</span>` : ""}
+        <span class="small muted">${esc(formatBytes(r.bytes))}</span>
+        <span class="small muted mono" title="${esc(r.file)}">${esc(r.requestId.slice(0, 8))}</span>
+      </div>
+      <button class="btn small-button" type="button" data-view-raw="${esc(r.requestId)}">${active ? "刷新内容" : "查看原始返回"}</button>
+    </div>`;
+  }).join("") : '<p class="small muted">已开启记录，新的请求返回（含流式与报错）会自动保存在此处。</p>';
+  if (state.rendered["raw-log-list"] !== html) {
+    $("raw-log-list").innerHTML = html;
+    state.rendered["raw-log-list"] = html;
+  }
+}
+async function viewRawLog(requestId) {
+  setError("raw-log-error", "");
+  try {
+    const { record } = await api("/api/raw-logs?id=" + encodeURIComponent(requestId));
+    state.activeRawLogId = requestId;
+    if (state.page !== "events") showPage("events");
+    const time = new Date(record.at).toLocaleString("zh-CN", { hour12: false });
+    $("raw-log-viewer-title").textContent = `上游原始返回 · ${time} · ${record.model || "—"} · HTTP ${record.status}`;
+    $("raw-log-viewer-file").textContent = `.vertex-streaming-anti-truncation/raw-responses/${record.file}`;
+    $("raw-log-output").textContent = record.content || "";
+    $("raw-log-viewer").hidden = false;
+    renderRawLogs();
+    $("raw-log-viewer").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (error) {
+    if (state.page !== "events") showPage("events");
+    setError("raw-log-error", error.message);
+  }
+}
 function eventTable(events) {
   if (!events.length) return '<div class="empty-state"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 4h18v24H7zM11 10h10M11 15h10M11 20h6"/></svg><strong>暂无请求记录</strong><p>向网关发送请求后，传输与还原状态会显示在这里。</p></div>';
+  const rawLogIds = new Set((state.rawLogs || []).map(r => r.requestId));
   return '<div class="table-wrap"><table><thead><tr><th>时间 / 请求</th><th>模型版本</th><th>状态</th><th>传输</th><th>正文还原</th><th>请求 / 实际档位</th><th>用量 / 估算费用</th><th>耗时</th></tr></thead><tbody>' + events.map(e => {
     const a = e.antiTruncation || {};
     const recovered = a.restored === true ? "已还原" : a.restored === false ? "未还原 / 跳过" : "未确认";
     // Pass-through requests keep the plain stream label; every audited transport, fallback and skip reason has its own.
     const transport = transportNames[a.transport] || (!a.transport || a.transport === "disabled" ? (e.stream ? "SSE 流式" : "普通响应") : a.transport);
     const success = e.status >= 200 && e.status < 300;
-    return `<tr><td><span class="mono">${esc(new Date(e.at).toLocaleTimeString("zh-CN", { hour12: false }))}</span><small title="${esc(e.requestId)}">${esc(e.requestId.slice(0, 8))}</small></td><td><span class="mono">${esc(e.model || "—")}</span><small>${esc(modeNames[e.mode] || "")}</small></td><td><span class="badge ${success ? "go" : "stop"}">${e.status}</span>${e.code ? `<small class="error-code" title="${esc(errorMessage(e.code))}">${esc(e.code)}</small>` : ""}${integrityBadge(e.responseIntegrity)}${e.upstreamError ? `<small>上游：${esc([e.upstreamError.status, e.upstreamError.reason].filter(Boolean).join(" · "))}</small>` : ""}${compatibilityBadge(e.geminiCompatibility)}${inputBadge(e)}</td><td><span title="${esc(a.transport || "")}">${esc(transport)}</span><small>${esc(a.finishReason || "—")}</small></td><td><span class="badge ${a.restored ? "go" : ""}">${recovered}</span><small>${a.streamDone === true ? "流已结束" : a.streamDone === false ? "流未完成" : ""}</small></td><td>${esc(tierNames[e.serviceTier] || "Standard")}<small>${esc(e.trafficType || "上游未报告")}</small></td>${usageCell(e)}<td class="mono">${(e.latencyMs / 1000).toFixed(2)} s</td></tr>`;
+    const rawBtn = rawLogIds.has(e.requestId) ? `<button class="text-button view-raw-btn" type="button" data-view-raw="${esc(e.requestId)}">查看原始返回</button>` : "";
+    return `<tr><td><span class="mono">${esc(new Date(e.at).toLocaleTimeString("zh-CN", { hour12: false }))}</span><small title="${esc(e.requestId)}">${esc(e.requestId.slice(0, 8))}</small>${rawBtn}</td><td><span class="mono">${esc(e.model || "—")}</span><small>${esc(modeNames[e.mode] || "")}</small></td><td><span class="badge ${success ? "go" : "stop"}">${e.status}</span>${e.code ? `<small class="error-code" title="${esc(errorMessage(e.code))}">${esc(e.code)}</small>` : ""}${integrityBadge(e.responseIntegrity)}${e.upstreamError ? `<small>上游：${esc([e.upstreamError.status, e.upstreamError.reason].filter(Boolean).join(" · "))}</small>` : ""}${compatibilityBadge(e.geminiCompatibility)}${inputBadge(e)}</td><td><span title="${esc(a.transport || "")}">${esc(transport)}</span><small>${esc(a.finishReason || "—")}</small></td><td><span class="badge ${a.restored ? "go" : ""}">${recovered}</span><small>${a.streamDone === true ? "流已结束" : a.streamDone === false ? "流未完成" : ""}</small></td><td>${esc(tierNames[e.serviceTier] || "Standard")}<small>${esc(e.trafficType || "上游未报告")}</small></td>${usageCell(e)}<td class="mono">${(e.latencyMs / 1000).toFixed(2)} s</td></tr>`;
   }).join("") + "</tbody></table></div>";
 }
 // Rebuilding a table resets its horizontal scroll and drops a text selection: skip unchanged
@@ -539,6 +602,7 @@ function renderTable(id, html, force) {
   const wrap = box.querySelector(".table-wrap"); if (wrap) wrap.scrollLeft = scroll;
 }
 function renderEvents(force) {
+  renderRawLogs();
   renderTable("recent-events", eventTable(state.events.slice(0, 4)));
   const filter = $("event-filter").value;
   renderTable("all-events", eventTable(state.events.filter(e => filter === "all" || (filter === "failed" ? e.status >= 400 : e.antiTruncation?.restored === true))), force);
@@ -547,7 +611,16 @@ async function refresh() {
   let status, events;
   try { [status, events] = await Promise.all([api("/api/status"), api("/api/events")]); }
   catch (error) { state.refreshError = error.message; throw error; }
-  state.status = status; state.events = events.events; renderStatus(); renderEvents();
+  state.status = status; state.events = events.events; state.rawLogs = events.rawLogs || [];
+  if (events.rawLog && document.activeElement !== $("raw-log-limit")) {
+    $("raw-log-enabled").checked = events.rawLog.enabled === true;
+    $("raw-log-limit").value = events.rawLog.limit || 10;
+    if (state.config?.settings) {
+      state.config.settings.recordRawResponses = events.rawLog.enabled === true;
+      state.config.settings.rawResponseLimit = events.rawLog.limit || 10;
+    }
+  }
+  renderStatus(); renderEvents();
   // Clear only a refresh failure; start, stop and logout failures stay until the next action.
   if (state.refreshError && $("global-error").textContent === state.refreshError) setError("global-error", "");
   state.refreshError = null;
@@ -558,7 +631,8 @@ async function enter() {
   fillConfig(pending?.settings);
   // A restored draft keeps its old revision, so a save after another session's save still gets the conflict message.
   if (pending) { state.config.revision = pending.revision; state.userLocation = pending.userLocation; state.dirty = true; updateDraft(false); }
-  for (const id of ["global-error", "form-error", "models-error", "discovery-error"]) setError(id, "");
+  state.activeRawLogId = null; $("raw-log-viewer").hidden = true;
+  for (const id of ["global-error", "form-error", "models-error", "discovery-error", "raw-log-error"]) setError(id, "");
   await refresh();
   state.pendingDraft = null;
   $("login-key").value = ""; $("login-view").hidden = true; $("app-view").hidden = false;
@@ -735,6 +809,53 @@ $("logout-button").addEventListener("click", e => {
   });
 });
 $("event-filter").addEventListener("change", () => renderEvents(true));
+async function saveRawLogSettings(announce) {
+  setError("raw-log-error", "");
+  const enabled = $("raw-log-enabled").checked;
+  const limit = Number($("raw-log-limit").value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    setError("raw-log-error", errorMessage("Invalid RAW_RESPONSE_LIMIT"));
+    return;
+  }
+  try {
+    const res = await api("/api/raw-logs/settings", { recordRawResponses: enabled, rawResponseLimit: limit });
+    state.rawLogs = res.rawLogs || state.rawLogs;
+    if (state.config) {
+      state.config.revision = res.revision;
+      state.config.saved = res.saved;
+      state.config.settings.recordRawResponses = res.rawLog.enabled;
+      state.config.settings.rawResponseLimit = res.rawLog.limit;
+    }
+    renderEvents(true);
+    if (announce) toast(res.rawLog.enabled ? `已开启上游原始返回记录（保留最近 ${res.rawLog.limit} 次）。` : "已关闭上游原始返回记录。");
+  } catch (error) {
+    if (state.config?.settings) {
+      $("raw-log-enabled").checked = state.config.settings.recordRawResponses === true;
+      $("raw-log-limit").value = state.config.settings.rawResponseLimit || 10;
+    }
+    setError("raw-log-error", error.message);
+  }
+}
+$("raw-log-enabled").addEventListener("change", () => void saveRawLogSettings(true));
+$("raw-log-limit").addEventListener("change", () => void saveRawLogSettings(true));
+$("raw-log-clear").addEventListener("click", e => action(e.currentTarget, async () => {
+  await api("/api/raw-logs/clear", {});
+  state.rawLogs = [];
+  state.activeRawLogId = null;
+  $("raw-log-viewer").hidden = true;
+  renderEvents(true);
+  toast("已清空保存的原始返回记录。");
+}, "raw-log-error"));
+$("raw-log-copy").addEventListener("click", () => copy($("raw-log-output").textContent));
+$("raw-log-close").addEventListener("click", () => {
+  state.activeRawLogId = null;
+  $("raw-log-viewer").hidden = true;
+  renderRawLogs();
+});
+document.addEventListener("click", e => {
+  const btn = e.target.closest("[data-view-raw]");
+  if (btn) void viewRawLog(btn.dataset.viewRaw);
+});
 $("probe-consent").addEventListener("change", updateProbeModel);
 $("probe-cancel").addEventListener("click", () => state.probe?.abort());
 $("probe-button").addEventListener("click", async () => {

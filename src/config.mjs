@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   projectId: "", location: "global", authMode: "service-account", serviceTier: "standard",
   port: 4781, timeoutMs: 600000, antiTruncation: true, contextInTool: false, models: null,
   hideUnavailableModels: true, geminiPrefillToUser: true, geminiLongDecode: false, unicodeInput: false, imageInput: "off",
+  recordRawResponses: false, rawResponseLimit: 10,
   geminiPromptRetryEnabled: false, geminiPromptRetryText: "", geminiPromptRetryMatches: null, customBaseUrl: "", customUpstreams: null,
   gatewayKey: "", serviceAccountJson: "", apiKey: "", accessToken: "", customApiKey: "",
 });
@@ -148,9 +149,10 @@ export function buildConfig(settings, { requireAscii = true, upstreamIds = null 
   if (!["off", "current-turn", "all"].includes(s.imageInput)) throw new Error("Invalid image input mode");
   if (s.unicodeInput && s.imageInput !== "off") throw new Error("Unicode and image input are mutually exclusive");
   if (typeof s.antiTruncation !== "boolean") throw new Error("Invalid anti-truncation setting");
-  for (const name of ["hideUnavailableModels", "geminiPrefillToUser", "geminiLongDecode", "geminiPromptRetryEnabled", "unicodeInput", "contextInTool"]) {
+  for (const name of ["hideUnavailableModels", "geminiPrefillToUser", "geminiLongDecode", "geminiPromptRetryEnabled", "unicodeInput", "contextInTool", "recordRawResponses"]) {
     if (typeof s[name] !== "boolean") throw new Error("Invalid compatibility toggle");
   }
+  const rawResponseLimit = integer(s.rawResponseLimit, 10, 1, 100, "RAW_RESPONSE_LIMIT");
   if (typeof s.geminiPromptRetryText !== "string" || Buffer.byteLength(s.geminiPromptRetryText) > MAX_RETRY_TEXT_BYTES) {
     throw new Error("Prompt retry text must be at most 192000 UTF-8 bytes");
   }
@@ -169,6 +171,7 @@ export function buildConfig(settings, { requireAscii = true, upstreamIds = null 
   return {
     ...connection, gatewayKey: key, models,
     hideUnavailableModels: s.hideUnavailableModels, geminiPrefillToUser: s.geminiPrefillToUser, geminiLongDecode: s.geminiLongDecode, unicodeInput: s.unicodeInput, imageInput: s.imageInput, contextInTool: s.contextInTool,
+    recordRawResponses: s.recordRawResponses, rawResponseLimit,
     geminiPromptRetry: { enabled: s.geminiPromptRetryEnabled, text: s.geminiPromptRetryText, ...(matches ? { errorMatches: matches } : {}) },
     // Legacy fields remain available to CLI integrations; profiles own behavior.
     model: models[0]?.id || MODEL_ID, upstreamModel: models[0]?.upstreamModel || UPSTREAM_MODEL,

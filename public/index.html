@@ -134,7 +134,31 @@
           <div class="save-bar"><div><strong id="models-draft-label">配置已同步</strong><span class="small muted">一起保存连接配置与模型列表。新请求立即生效。</span></div><div class="actions"><button id="models-discard" class="btn ghost">放弃修改</button><button id="models-save" class="btn primary">保存全部配置 <span aria-hidden="true">→</span></button></div></div>
         </section>
 
-        <section id="page-events" class="page" hidden><div class="section-intro"><div><h2>请求与还原记录</h2><p class="muted">仅记录状态元数据。最近 200 条，关闭控制台后清空。</p></div><label class="filter-label">筛选<select id="event-filter"><option value="all">全部请求</option><option value="failed">失败请求</option><option value="restored">已还原正文</option></select></label></div><section class="panel"><div id="all-events"></div></section></section>
+        <section id="page-events" class="page" hidden>
+          <div class="section-intro"><div><h2>请求与还原记录</h2><p class="muted">状态元数据在内存中保留最近 200 条；开启下方开关可将完整上游原始返回保存到本地目录。</p></div><label class="filter-label">筛选<select id="event-filter"><option value="all">全部请求</option><option value="failed">失败请求</option><option value="restored">已还原正文</option></select></label></div>
+          <section class="panel raw-log-panel">
+            <div class="raw-log-bar">
+              <label class="toggle-row raw-log-toggle"><span><strong>记录上游原始返回（含报错返回）</strong><small>开启后记录接收到的完整上游回复，保存在 <code class="mono">settings.json</code> 同一目录下（<code class="mono">.vertex-streaming-anti-truncation/raw-responses</code>），切换立即生效。</small></span><input id="raw-log-enabled" type="checkbox" role="switch"></label>
+              <div class="raw-log-controls">
+                <label class="filter-label" for="raw-log-limit">保留最近<input id="raw-log-limit" type="number" min="1" max="100" value="10" aria-label="保留最近几次原始返回">次</label>
+                <button id="raw-log-clear" class="btn ghost" type="button">清空记录</button>
+              </div>
+            </div>
+            <div id="raw-log-error" class="notice error" role="alert" hidden></div>
+            <div id="raw-log-section" class="raw-log-section" hidden>
+              <div class="raw-log-head"><span class="eyebrow">SAVED UPSTREAM RESPONSES</span><span id="raw-log-count" class="small muted">0 条已保存</span></div>
+              <div id="raw-log-list" class="raw-log-list"></div>
+            </div>
+            <div id="raw-log-viewer" class="raw-log-viewer" hidden>
+              <div class="raw-log-viewer-head">
+                <div><strong id="raw-log-viewer-title">上游原始返回</strong><span id="raw-log-viewer-file" class="small muted mono"></span></div>
+                <div class="actions"><button id="raw-log-copy" class="btn small-button" type="button">复制内容</button><button id="raw-log-close" class="btn ghost small-button" type="button">收起</button></div>
+              </div>
+              <pre id="raw-log-output" class="response-output raw-log-output"></pre>
+            </div>
+          </section>
+          <section class="panel"><div id="all-events"></div></section>
+        </section>
 
         <section id="page-test" class="page" hidden><div class="section-intro"><div><h2>检查连接与流式还原</h2><p class="muted">先确认配置，再按需发送一条短请求。</p></div></div><div class="test-grid"><section class="panel"><div class="panel-head"><h2>测试请求</h2><span class="badge">最多 512 TOKENS</span></div><div class="field"><label for="probe-model">选择已应用的模型版本</label><select id="probe-model" aria-describedby="probe-model-help"></select><p id="probe-model-help" class="hint"></p></div><p class="muted">固定提示词：写三行关于河流的短句。</p><label class="toggle-row"><span><strong>流式响应</strong><small>观察正文是否分段到达。</small></span><input id="probe-stream" type="checkbox" role="switch" checked></label><div id="probe-cost-notice" class="notice">测试将使用已应用的凭据与服务等级发送一次真实请求，可能产生 Google Cloud 费用。</div><label class="consent"><input id="probe-consent" type="checkbox"><span id="probe-consent-label">我同意发送这一次真实测试请求</span></label><div class="actions"><button id="probe-button" class="btn primary" disabled>发送测试</button><button id="probe-cancel" class="btn" hidden>取消请求</button></div><p id="probe-error" class="field-error" role="alert"></p></section><section class="panel"><div class="panel-head"><h2>响应结果</h2><span id="probe-status" class="badge">尚未测试</span></div><pre id="probe-output" class="response-output">测试完成后，在这里查看回复。</pre><dl id="probe-meta" class="details"></dl></section></div></section>
         <footer class="page-footer"><span>VERTEX GATEWAY <span class="footer-dot">/</span> LOCAL FIRST</span><span>抗截断传输恢复已收到的正文，不保证模型输出完整。</span></footer>
