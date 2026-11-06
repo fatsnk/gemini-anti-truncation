@@ -185,10 +185,10 @@ export function prepareAntiTruncation(payload, enabled, streamArguments = false,
             tools: [...clientTools, { type: "function", function: {
                 name: toolName,
                 description: packed ? packed.toolDescription : "Deliver the user-visible reply as text.",
-                parameters: { type: "object", properties: { content: contentProp }, required: ["content"], additionalProperties: false },
+                parameters: { type: "object", properties: { content: contentProp }, required: ["content"] },
             } }],
-            tool_choice: callable ? "required" : { type: "function", function: { name: toolName } },
-            ...(callable ? {} : { parallel_tool_calls: false }),
+            //tool_choice: callable ? "required" : { type: "function", function: { name: toolName } },
+            //...(callable ? {} : { parallel_tool_calls: false }),
         },
     };
 }
